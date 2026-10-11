@@ -10,6 +10,17 @@ FastAccelStepperEngine engine;
 constexpr uint8_t TIMED_SEGMENT_DIRECTION_ENTRY_MARGIN = 2;
 constexpr uint32_t TIMED_SEGMENT_PARTIAL_RETRY_TIMEOUT_MS = 1000;
 
+// 論理A/B(CoreXY A=X+Y, B=X-Y)を出力する物理STEP/DIRピン。
+// MOTOR_AB_SWAPPEDで配線の入れ替えをここだけで吸収する。
+constexpr uint8_t LOGICAL_A_STEP_PIN =
+    MOTOR_AB_SWAPPED ? MOTOR_B_STEP_PIN : MOTOR_A_STEP_PIN;
+constexpr uint8_t LOGICAL_A_DIR_PIN =
+    MOTOR_AB_SWAPPED ? MOTOR_B_DIR_PIN : MOTOR_A_DIR_PIN;
+constexpr uint8_t LOGICAL_B_STEP_PIN =
+    MOTOR_AB_SWAPPED ? MOTOR_A_STEP_PIN : MOTOR_B_STEP_PIN;
+constexpr uint8_t LOGICAL_B_DIR_PIN =
+    MOTOR_AB_SWAPPED ? MOTOR_A_DIR_PIN : MOTOR_B_DIR_PIN;
+
 StepperBackend::DiagnosticPulseResult queueDiagnosticPulseOnMotor(
     FastAccelStepper* motor, bool& direction_positive, uint32_t frequency_hz) {
   if (motor == nullptr || frequency_hz == 0 ||
@@ -38,12 +49,12 @@ StepperBackend::DiagnosticPulseResult queueDiagnosticPulseOnMotor(
 bool StepperBackendFastAccel::begin() {
 #if !SIMULATION_MODE
   engine.init();
-  motor_a_ = engine.stepperConnectToPin(MOTOR_A_STEP_PIN);
-  motor_b_ = engine.stepperConnectToPin(MOTOR_B_STEP_PIN);
+  motor_a_ = engine.stepperConnectToPin(LOGICAL_A_STEP_PIN);
+  motor_b_ = engine.stepperConnectToPin(LOGICAL_B_STEP_PIN);
   if (motor_a_ == nullptr || motor_b_ == nullptr) return false;
-  motor_a_->setDirectionPin(MOTOR_A_DIR_PIN, MOTOR_A_DIRECTION_INVERTED,
+  motor_a_->setDirectionPin(LOGICAL_A_DIR_PIN, MOTOR_A_DIRECTION_INVERTED,
                             DIR_CHANGE_DELAY_US);
-  motor_b_->setDirectionPin(MOTOR_B_DIR_PIN, MOTOR_B_DIRECTION_INVERTED,
+  motor_b_->setDirectionPin(LOGICAL_B_DIR_PIN, MOTOR_B_DIRECTION_INVERTED,
                             DIR_CHANGE_DELAY_US);
   configureSpeed(DEFAULT_FEED_MM_MIN);
 #endif
@@ -193,7 +204,7 @@ bool StepperBackendFastAccel::beginDiagnosticTone() {
 #else
   if (!ready_ || motor_a_ == nullptr || motor_a_->isRunning()) return false;
   diagnostic_direction_positive_ = true;
-  motor_a_->setDirectionPin(MOTOR_A_DIR_PIN, MOTOR_A_DIRECTION_INVERTED, 0);
+  motor_a_->setDirectionPin(LOGICAL_A_DIR_PIN, MOTOR_A_DIRECTION_INVERTED, 0);
   return true;
 #endif
 }
@@ -213,7 +224,7 @@ StepperBackendFastAccel::queueDiagnosticPulse(uint32_t frequency_hz) {
 void StepperBackendFastAccel::endDiagnosticTone() {
 #if !SIMULATION_MODE
   if (motor_a_ != nullptr) {
-    motor_a_->setDirectionPin(MOTOR_A_DIR_PIN, MOTOR_A_DIRECTION_INVERTED,
+    motor_a_->setDirectionPin(LOGICAL_A_DIR_PIN, MOTOR_A_DIRECTION_INVERTED,
                               DIR_CHANGE_DELAY_US);
   }
 #endif
@@ -229,8 +240,8 @@ bool StepperBackendFastAccel::beginDiagnosticChord() {
   }
   diagnostic_direction_positive_ = true;
   diagnostic_direction_positive_b_ = true;
-  motor_a_->setDirectionPin(MOTOR_A_DIR_PIN, MOTOR_A_DIRECTION_INVERTED, 0);
-  motor_b_->setDirectionPin(MOTOR_B_DIR_PIN, MOTOR_B_DIRECTION_INVERTED, 0);
+  motor_a_->setDirectionPin(LOGICAL_A_DIR_PIN, MOTOR_A_DIRECTION_INVERTED, 0);
+  motor_b_->setDirectionPin(LOGICAL_B_DIR_PIN, MOTOR_B_DIRECTION_INVERTED, 0);
   return true;
 #endif
 }
@@ -262,11 +273,11 @@ StepperBackendFastAccel::queueDiagnosticPulseB(uint32_t frequency_hz) {
 void StepperBackendFastAccel::endDiagnosticChord() {
 #if !SIMULATION_MODE
   if (motor_a_ != nullptr) {
-    motor_a_->setDirectionPin(MOTOR_A_DIR_PIN, MOTOR_A_DIRECTION_INVERTED,
+    motor_a_->setDirectionPin(LOGICAL_A_DIR_PIN, MOTOR_A_DIRECTION_INVERTED,
                               DIR_CHANGE_DELAY_US);
   }
   if (motor_b_ != nullptr) {
-    motor_b_->setDirectionPin(MOTOR_B_DIR_PIN, MOTOR_B_DIRECTION_INVERTED,
+    motor_b_->setDirectionPin(LOGICAL_B_DIR_PIN, MOTOR_B_DIRECTION_INVERTED,
                               DIR_CHANGE_DELAY_US);
   }
 #endif

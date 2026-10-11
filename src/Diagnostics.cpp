@@ -23,6 +23,9 @@ void Diagnostics::printConfig() {
   logMessage("MOTOR A STEP=%u DIR=%u B STEP=%u DIR=%u EN=HARDWIRED_GND active",
              MOTOR_A_STEP_PIN, MOTOR_A_DIR_PIN, MOTOR_B_STEP_PIN,
              MOTOR_B_DIR_PIN);
+  logMessage("MOTOR ab_swapped=%u a_inverted=%u b_inverted=%u",
+             MOTOR_AB_SWAPPED, MOTOR_A_DIRECTION_INVERTED,
+             MOTOR_B_DIRECTION_INVERTED);
   logMessage("TMC UART TX=%u RX=%u baud=%lu A.address=%u B.address=%u",
              TMC_UART_TX_PIN, TMC_UART_RX_PIN, TMC_UART_BAUD,
              TMC_A_UART_ADDRESS, TMC_B_UART_ADDRESS);

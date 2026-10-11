@@ -158,6 +158,14 @@ constexpr uint8_t PEN_DOWN_ANGLE_DEG = 80;
 constexpr bool MOTOR_A_DIRECTION_INVERTED = false;
 constexpr bool MOTOR_B_DIRECTION_INVERTED = false;
 
+// 論理A/Bモータと物理STEP/DIRピン(=ドライバ)の対応を入れ替える。
+// true: 論理A(X+Y)をMOTOR_B_STEP/DIR_PINへ、論理B(X-Y)をMOTOR_A_STEP/DIR_PINへ出力する。
+// 決め方: +X命令は正しいが+Y命令で-Yへ動く(=homing Yがswitchから離れる)場合、
+// A/Bモータの配線が入れ替わっている。片側だけのDIRECTION_INVERTEDでは直らない
+// (片側反転はX/Yが入れ替わり、両側反転はXも逆になる)ため、この設定で吸収する。
+// MOTOR_A/B_DIRECTION_INVERTEDは入れ替え後の論理A/Bに対して適用される。
+constexpr bool MOTOR_AB_SWAPPED = false;
+
 // ============================================================================
 // Homing / limit switches
 // ============================================================================

@@ -1994,6 +1994,22 @@ KST32Bストロークフォントデータをホスト側で読み、日本語�
 - [ ] LIMIT_WATCHでX/Y各2 edge、bounce量を確認
 - [ ] 検査後に通常ファームウェアを書き戻し、通常`SELFTEST`を確認
 
+## 12.13 A/Bモータ入替設定 / Y homing方向調査
+
+実機homingでXは正方向、Yはswitchから離れる方向へ動いた。A/B入替を疑い`MOTOR_AB_SWAPPED`を追加したが、`true`で`TEST_A`が+X(switchから離れる)かつYがswitch側へ動いたため、配線入替ではないと判明。設定は残し`false`へ戻した。
+
+- [x] `PlotterConfig.h`に`MOTOR_AB_SWAPPED`を追加(配線差吸収用、現在`false`)
+- [x] `StepperBackendFastAccel`で論理A/Bと物理STEP/DIRピンの対応を入替可能にした
+- [x] `CONFIG`に`ab_swapped`/方向反転設定を表示
+- [x] `direction-check.md`の判定表に「Xは正しくYだけ逆」とhoming前`TEST_A/B`確認を追加
+- [x] 実機: `MOTOR_AB_SWAPPED=true`で`TEST_A`がYについてswitch側へ動くことを確認 → 入替不要
+- [x] 実機: `MOTOR_AB_SWAPPED=false`で`CONFIG`/`SELFTEST PASS`/`LIMIT_STATUS`(X/Y OFF)を確認
+- [x] 実機: `TEST_A`/`TEST_B`の方向と`HOME`完了を確認
+
+未解決リスク:
+
+- 初回のY homingがswitchから離れた原因は未特定(再現せず)。候補は(1)開始時Y limitがON判定されBackoff(最大`HOMING_START_BACKOFF_MM`=40mm)へ入った(新PCBのpull-up、配線接触)、(2)正常なBackoff動作の誤認。再発時は`HOME_Y started`行と`LIMIT_ON_AT_START`有無を記録する。
+
 ---
 
 # 13. Codex用プロンプト

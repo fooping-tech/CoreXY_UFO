@@ -1174,6 +1174,21 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - `SELFTEST`はモータを回さない自動判定(limit安定性、TMC A/B UART/version/アドレスピン/ENN/GSTAT/DRV_STATUS、PIN_CHECK)で、最終行は`SELFTEST RESULT PASS|FAIL fails=N`。
 - 判定NGは`FAIL`/`WARN`接頭辞でログし、Serial Toolを止める`ERROR:`はコマンド書式エラーだけに使う。
 
+## 21.3 A/Bモータ入替設定 (`MOTOR_AB_SWAPPED`)
+
+配線差の吸収用設定。CoreXYでは論理A/Bを入れ替えると`x'=x, y'=-y`となるため、これはA/Bモータ配線の入替で説明できる。`MOTOR_A/B_DIRECTION_INVERTED`の片側反転ではX/Yが入れ替わり、両側反転ではXも逆になるため吸収できない。
+
+| 設定 | 意味 |
+|---|---|
+| `MOTOR_AB_SWAPPED=false` | 論理A(X+Y)を`MOTOR_A_STEP/DIR_PIN`、論理B(X-Y)を`MOTOR_B_STEP/DIR_PIN`へ出力(現在値) |
+| `MOTOR_AB_SWAPPED=true` | 論理AをMOTOR_B側ピン、論理BをMOTOR_A側ピンへ出力 |
+
+- 判定は`TEST_A`で行う。`TEST_A`がX/Yともswitchから離れる方向へ動けば`false`が正しい。
+- 入替は`StepperBackendFastAccel`内のピン選択だけで行う。CoreXY式、`Core2PinMap.h`のピン定義、TMC UARTアドレスは変更しない。
+- `MOTOR_A/B_DIRECTION_INVERTED`は入替後の論理A/Bに適用する。
+- `true`のとき、`TEST_A`/`MELODY`(論理A)は物理ドライバB(UARTアドレス1)側で動く。`TMC_STATUS`のA/Bは物理ドライバ表記のまま。
+- `CONFIG`は`MOTOR ab_swapped=<0|1> a_inverted=<0|1> b_inverted=<0|1>`を表示する。
+
 ## 22. 受け入れ条件
 
 初期版は以下を満たすこと。
