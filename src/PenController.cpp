@@ -60,11 +60,22 @@ bool PenController::writeAngle(unsigned angle_deg) {
   const uint16_t position = static_cast<uint16_t>(
       (angle_deg * PEN_SERVO_MAX_POSITION + PEN_SERVO_FULL_TURN_DEG / 2) /
       PEN_SERVO_FULL_TURN_DEG);
-  // Library default write return level does not ACK motion completion.
-  // Verify position separately after the servo has had time to move.
+  // Default library write return level does not ACK physical motion.
   if (!pen_servo.EnableTorque(PEN_SERVO_ID, 1)) return false;
-  return pen_servo.WritePosEx(PEN_SERVO_ID, position,
-                              PEN_SERVO_SPEED, PEN_SERVO_ACCELERATION) != 0;
+  if (!pen_servo.WritePosEx(PEN_SERVO_ID, position,
+                             PEN_SERVO_SPEED, PEN_SERVO_ACCELERATION)) {
+    return false;
+  }
+  const uint32_t started_ms = millis();
+  do {
+    const int actual = pen_servo.ReadPos(PEN_SERVO_ID);
+    if (actual >= 0 && actual <= PEN_SERVO_MAX_POSITION) {
+      const int error = actual > position ? actual - position : position - actual;
+      if (error <= PEN_SERVO_POSITION_TOLERANCE) return true;
+    }
+    delay(20);  // Give SafetyTask/other Core 1 tasks CPU time.
+  } while (millis() - started_ms < PEN_SERVO_MOVE_TIMEOUT_MS);
+  return false;
 #endif
 }
 
