@@ -98,8 +98,11 @@ bool JobController::beginJob(const JobPreflight& preflight, SafetyManager& safet
     return reject("not_homed", "JOB_BEGIN");
   }
 
+  if (!pen.penUp()) {
+    setState(JobState::IDLE);
+    return reject("pen_servo_no_response", "JOB_BEGIN");
+  }
   homed_at_begin_ = true;
-  pen.penUp();
   machine.pen_down = false;
   ++job_sequence_;
   copyText(result_, sizeof(result_), "running");
@@ -129,7 +132,11 @@ bool JobController::endJob(const JobPreflight& preflight, SafetyManager& safety,
   safety.poll();
   machine.alarmed = safety.isAlarmed();
   if (!machine.alarmed) {
-    pen.penUp();
+    if (!pen.penUp()) {
+      markFailed("pen_servo_no_response");
+      logMessage("JOB_END failed reason=pen_servo_no_response");
+      return false;
+    }
     machine.pen_down = false;
   }
   if (machine.alarmed) {
