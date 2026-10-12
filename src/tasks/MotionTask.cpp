@@ -721,6 +721,10 @@ void handleJobEnd() {
 
   if (!pen_controller.penUp()) {
     job_controller.markFailed("pen_servo_no_response");
+    safety_manager.setAlarm("pen servo no response");
+    machine_state.alarmed = true;
+    invalidateHomed("pen servo no response");
+    clearMotionQueues("pen servo fault");
     logMessage("ERROR: JOB_END pen up failed; park refused");
     postLedStatus(LedStatus::ERROR);
     return;
@@ -921,10 +925,20 @@ void motionTask(void*) {
         } else {
           logMessage("ERROR: PEN UP STS3020 no response");
           postLedStatus(LedStatus::ERROR);
-          if (job_controller.isActive()) job_controller.markFailed("pen_servo_no_response");
+          if (job_controller.isActive()) {
+            job_controller.markFailed("pen_servo_no_response");
+            safety_manager.setAlarm("pen servo no response");
+            machine_state.alarmed = true;
+            invalidateHomed("pen servo no response");
+            clearMotionQueues("pen servo fault");
+          }
         }
         break;
       case CommandType::PEN_DOWN:
+        if (safety_manager.isAlarmed()) {
+          logMessage("ERROR: PEN DOWN blocked; machine alarmed");
+          break;
+        }
         if (pen_controller.penDown()) {
           machine_state.pen_down = true;
           postLedStatus(LedStatus::DRAWING_PEN_DOWN);
@@ -932,7 +946,13 @@ void motionTask(void*) {
         } else {
           logMessage("ERROR: PEN DOWN STS3020 no response");
           postLedStatus(LedStatus::ERROR);
-          if (job_controller.isActive()) job_controller.markFailed("pen_servo_no_response");
+          if (job_controller.isActive()) {
+            job_controller.markFailed("pen_servo_no_response");
+            safety_manager.setAlarm("pen servo no response");
+            machine_state.alarmed = true;
+            invalidateHomed("pen servo no response");
+            clearMotionQueues("pen servo fault");
+          }
         }
         break;
       case CommandType::PEN_STATUS: {
