@@ -16,8 +16,16 @@ constexpr uint8_t TMC_UART_TX_PIN = 14;
 constexpr uint8_t TMC_UART_RX_PIN = 13;
 constexpr uint8_t X_LIMIT_PIN = 36;
 constexpr uint8_t Y_LIMIT_PIN = 35;
-constexpr uint8_t PEN_SERVO_PIN = 32;
+// Core2 Port A belongs exclusively to the FEETECH STS3020 UART adapter.
+// Waveshare Bus Servo Adapter (A): Core2 TX->adapter TX, RX->adapter RX.
+constexpr uint8_t PEN_SERVO_UART_TX_PIN = 32;
+constexpr uint8_t PEN_SERVO_UART_RX_PIN = 33;
+// GPIO33 was used for an external NeoPixel strip. It cannot share UART RX.
+constexpr bool NEOPIXEL_ENABLED = false;
 constexpr uint8_t NEOPIXEL_PIN = 33;
+static_assert(!NEOPIXEL_ENABLED ||
+                  NEOPIXEL_PIN != PEN_SERVO_UART_RX_PIN,
+              "NeoPixel and STS3020 UART must not share GPIO33");
 constexpr bool MOTOR_ENABLE_HARDWIRED_ACTIVE = true;
 constexpr bool M5_UI_ENABLED = true;
 
