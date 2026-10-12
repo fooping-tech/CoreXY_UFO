@@ -2358,3 +2358,25 @@ M1: 実機homing、timed segment、最小G-codeの土台を作る
 
 Phase 11以降は、実装範囲を確認してから着手する。  
 Codexは勝手に実装しないこと。
+
+
+## 2026-10-12 STS3020 UART移行の実装・実機確認
+
+- [x] Core2 Port A GPIO32/33をSerial1のTX/RXへ割当
+- [x] FTServo SMS_STSをPenControllerの内部に封じ込め、PWM出力を撤去
+- [x] PENUP/PENDOWN/M3/M5を維持、PEN_STATUS無動作診断を追加
+- [x] 起動時の自動サーボ駆動禁止、通信失敗時のペン状態更新防止
+- [x] ペン位置指令後の内蔵エンコーダ目標位置確認（2秒timeout/35カウント許容）
+- [x] JOB_BEGIN/JOB_ENDにサーボ通信失敗の拒否/停止処理を追加
+- [x] GPIO33 NeoPixel出力停止、LEDコマンドを無効化、HWTESTにも適用
+- [x] 検査CSV/配線手順/仕様書を更新
+- [ ] PlatformIO main/sim/hwtestビルド（実行環境未提供）
+- [ ] Core2へ書込み、SIMULATION_MODEのGPIO非駆動を確認
+- [ ] 半二重TTL変換基板のモード、TX-TX/RX-RXの正しい配線、7.4Vの突入/ストール電流を確認
+- [ ] STS3020 ID=1、1MbpsでPing/PEN_STATUSの実応答を確認
+- [ ] ホーン未装着で60度/80度指令・速度/加速度・位置到達を測定
+- [ ] ホーン/機構取付後の衝突、最大負荷、発熱、停止時挙動を検証
+- [ ] サーボ電源断/通信抜去時にペン指令とJOB_BEGIN/JOB_ENDが安全に失敗することを確認
+- [ ] TMC2209共存、NeoPixel端子不駆動、XY/ジョブ/G-codeとHWTESTの回帰確認
+
+未解決リスク: ペン角度とサーボのゼロ点オフセット、機械接触を含む負荷条件、通信成功と実動作完了の差、サーボ指令失敗時に物理的なペンが下がっている可能性、外部電源とGNDのノイズ/過電流。実機試験までは完了扱いにしない。

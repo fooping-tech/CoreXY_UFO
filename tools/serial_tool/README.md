@@ -121,8 +121,9 @@ python tools/serial_tool/serial_send.py \
 | [High-Speed Check](docs/high-speed-check.md) | homing後の通常XY移動を上限feed付近で確認 | `examples/high_speed_check.csv`, `examples/high_speed_sweep_check.csv` |
 | [Concentric Squares Check](docs/concentric-squares-check.md) | 動き出し・動き終わりの線歪みを5重正方形で調査 | `examples/concentric_squares_check.csv`, `examples/concentric_squares_clockwise_check.csv`, `examples/concentric_squares_high_speed_check.csv` |
 | [Diagnostic AB_TIMED Square Draw](docs/diagnostic-ab-timed-square-draw.md) | `AB_TIMED`でA/Bを直接timed実行して四角の歪みを比較 | `examples/diagnostic_ab_timed_square_draw.csv` |
-| [Servo On/Off Check](docs/servo-on-off-check.md) | ペン上げ/下げサーボ角度と配線 | `examples/servo_check.csv` |
-| [LED Check](docs/led-check.md) | NEOPIXEL配線、色、輝度、pattern | `examples/led_check.csv` |
+| [STS3020 Check](docs/sts3020-check.md) | Core2 UART1での半二重TTLサーボ通信・位置診断・安全な微動 | `examples/sts3020_check.csv` |
+| [Servo On/Off Check](docs/servo-on-off-check.md) | STS3020ペン上げ/下げサーボ角度と配線 | `examples/servo_check.csv` |
+| [LED Check](docs/led-check.md) | 現行STS3020構成では**無効**（GPIO33競合） | `examples/led_check.csv`（旧構成専用） |
 | [Melody Check](docs/melody-check.md) | TMC UART、Aモータ、診断メロディprofile | `examples/melody_check.csv` |
 
 設定変更が必要な場合は、該当ドキュメントに従って`include/PlotterConfig.h`を編集し、再ビルド・再書き込みしてください。

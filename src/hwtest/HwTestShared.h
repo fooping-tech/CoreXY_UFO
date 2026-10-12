@@ -17,6 +17,7 @@ enum class HwCommandType : uint8_t {
   MOTOR,
   STOP,
   SERVO,
+  SERVO_STATUS,
   PENUP,
   PENDOWN,
   SERVO_SWEEP,

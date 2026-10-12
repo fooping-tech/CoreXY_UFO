@@ -13,6 +13,7 @@ enum class CommandType {
   DWELL,
   PEN_UP,
   PEN_DOWN,
+  PEN_STATUS,
   SELFTEST,
   TMC_INIT,
   TMC_STATUS,

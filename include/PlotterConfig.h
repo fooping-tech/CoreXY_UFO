@@ -144,6 +144,19 @@ constexpr uint32_t DIR_CHANGE_DELAY_US = 200;
 // ============================================================================
 // Pen servo
 // ============================================================================
+// FEETECH STS3020 half-duplex TTL bus servo (external UART adapter required).
+// Factory defaults are normally ID 1 and 1 Mbps; verify on the real device.
+constexpr uint8_t PEN_SERVO_ID = 1;
+constexpr uint32_t PEN_SERVO_UART_BAUD = 1000000;
+constexpr uint16_t PEN_SERVO_SPEED = 300;
+constexpr uint8_t PEN_SERVO_ACCELERATION = 20;
+// Stop after a bounded delay instead of allowing XY to start with an unknown pen position.
+constexpr uint32_t PEN_SERVO_MOVE_TIMEOUT_MS = 2000;
+constexpr uint16_t PEN_SERVO_POSITION_TOLERANCE = 35;  // ~3 degrees
+
+constexpr uint16_t PEN_SERVO_MAX_POSITION = 4095;
+constexpr unsigned PEN_SERVO_FULL_TURN_DEG = 360;
+
 // ペン上げ/下げのサーボ角度 [deg]。
 // 決め方: 機構に合わせて、紙を擦らない上げ角と十分に接地する下げ角を実測する。
 constexpr uint8_t PEN_UP_ANGLE_DEG = 60;

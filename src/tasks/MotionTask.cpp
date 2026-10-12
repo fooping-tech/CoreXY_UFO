@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <string.h>
 #include "AppContext.h"
+#include "Core2PinMap.h"
 #include "CoreXYKinematics.h"
 #include "Diagnostics.h"
 #include "GcodeInterpreter.h"
@@ -718,7 +719,16 @@ void handleJobEnd() {
     return;
   }
 
-  pen_controller.penUp();
+  if (!pen_controller.penUp()) {
+    job_controller.markFailed("pen_servo_no_response");
+    safety_manager.setAlarm("pen servo no response");
+    machine_state.alarmed = true;
+    invalidateHomed("pen servo no response");
+    clearMotionQueues("pen servo fault");
+    logMessage("ERROR: JOB_END pen up failed; park refused");
+    postLedStatus(LedStatus::ERROR);
+    return;
+  }
   machine_state.pen_down = false;
   postLedStatus(LedStatus::DRAWING_PEN_UP);
   logMessage("JOB_END pen up before park");
@@ -854,6 +864,11 @@ void handleSingleMotor(bool motor_a, int32_t steps) {
 }
 
 void motionTask(void*) {
+  const bool pen_ready = pen_controller.begin();
+  logMessage("STS3020 UART1 TX=%u RX=%u baud=%lu ID=%u ping=%s (no startup motion)",
+             PEN_SERVO_UART_TX_PIN, PEN_SERVO_UART_RX_PIN,
+             static_cast<unsigned long>(PEN_SERVO_UART_BAUD), PEN_SERVO_ID,
+             pen_ready ? "OK" : "NO_REPLY");
   CommandMessage command;
   for (;;) {
     if (!receiveNextCommand(command, portMAX_DELAY)) continue;
@@ -903,17 +918,54 @@ void motionTask(void*) {
         vTaskDelay(pdMS_TO_TICKS(command.dwell_ms));
         break;
       case CommandType::PEN_UP:
-        pen_controller.penUp();
-        machine_state.pen_down = false;
-        postLedStatus(LedStatus::DRAWING_PEN_UP);
-        logMessage("PEN UP");
+        if (pen_controller.penUp()) {
+          machine_state.pen_down = false;
+          postLedStatus(LedStatus::DRAWING_PEN_UP);
+          logMessage("PEN UP");
+        } else {
+          logMessage("ERROR: PEN UP STS3020 no response");
+          postLedStatus(LedStatus::ERROR);
+          if (job_controller.isActive()) {
+            job_controller.markFailed("pen_servo_no_response");
+            safety_manager.setAlarm("pen servo no response");
+            machine_state.alarmed = true;
+            invalidateHomed("pen servo no response");
+            clearMotionQueues("pen servo fault");
+          }
+        }
         break;
       case CommandType::PEN_DOWN:
-        pen_controller.penDown();
-        machine_state.pen_down = true;
-        postLedStatus(LedStatus::DRAWING_PEN_DOWN);
-        logMessage("PEN DOWN");
+        if (safety_manager.isAlarmed()) {
+          logMessage("ERROR: PEN DOWN blocked; machine alarmed");
+          break;
+        }
+        if (pen_controller.penDown()) {
+          machine_state.pen_down = true;
+          postLedStatus(LedStatus::DRAWING_PEN_DOWN);
+          logMessage("PEN DOWN");
+        } else {
+          logMessage("ERROR: PEN DOWN STS3020 no response");
+          postLedStatus(LedStatus::ERROR);
+          if (job_controller.isActive()) {
+            job_controller.markFailed("pen_servo_no_response");
+            safety_manager.setAlarm("pen servo no response");
+            machine_state.alarmed = true;
+            invalidateHomed("pen servo no response");
+            clearMotionQueues("pen servo fault");
+          }
+        }
         break;
+      case CommandType::PEN_STATUS: {
+        int position = -1;
+        if (pen_controller.ping() && pen_controller.readPosition(position)) {
+          logMessage("PEN_STATUS OK id=%u position=%d (0..%u) commanded=%s",
+                     PEN_SERVO_ID, position, PEN_SERVO_MAX_POSITION,
+                     pen_controller.isPenDown() ? "DOWN" : "UP");
+        } else {
+          logMessage("ERROR: PEN_STATUS STS3020 no response");
+        }
+        break;
+      }
       case CommandType::SELFTEST:
         Diagnostics::runSelfTest();
         break;

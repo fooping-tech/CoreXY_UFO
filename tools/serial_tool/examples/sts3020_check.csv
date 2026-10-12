@@ -1,0 +1,9 @@
+command,delay_ms,expect,comment
+CONFIG,400,STS3020 UART TX=32 RX=33,Verify Core2 pins; LED disabled
+PEN_STATUS,600,PEN_STATUS OK,Read actual position without moving (power must be applied)
+SELFTEST,500,SELFTEST PASS,CoreXY math selftest does not move motors
+PENUP,1500,PEN UP,Remove horn and confirm 60 degree target first
+PEN_STATUS,700,PEN_STATUS OK,Confirm feedback changes after the move
+PENDOWN,1500,PEN DOWN,Confirm 80 degree target after inspecting clearance
+PEN_STATUS,700,PEN_STATUS OK,Confirm position again
+PENUP,1500,PEN UP,Finish safely with requested up angle
