@@ -218,7 +218,7 @@ void draw(const HwStatus& s) {
   gfx->setTextColor(COLOR_MUTED, COLOR_BG);
   gfx->drawString("SELFTEST", 22, 226);
   gfx->drawString("PEN UP/DN", 128, 226);
-  gfx->drawString("LED TEST", 238, 226);
+  gfx->drawString("LED OFF", 238, 226);
 
   if (gfx != &M5.Display) canvas.pushSprite(0, 0);
 }
