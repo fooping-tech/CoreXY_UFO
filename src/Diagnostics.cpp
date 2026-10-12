@@ -32,6 +32,10 @@ void Diagnostics::printConfig() {
              static_cast<unsigned long>(PEN_SERVO_UART_BAUD),
              PEN_SERVO_ID, PEN_UP_ANGLE_DEG, PEN_DOWN_ANGLE_DEG,
              NEOPIXEL_ENABLED ? "ENABLED" : "DISABLED");
+  logMessage("STS3020 feedback tolerance=%u ticks timeout=%lums speed=%u acceleration=%u",
+             PEN_SERVO_POSITION_TOLERANCE,
+             static_cast<unsigned long>(PEN_SERVO_MOVE_TIMEOUT_MS),
+             PEN_SERVO_SPEED, PEN_SERVO_ACCELERATION);
   logMessage("MOTION steps_per_mm=%.3f default_feed=%.3f max_feed=%.3f accel=%.3f soft_limit X=[%.3f,%.3f] Y=[%.3f,%.3f]",
              STEPS_PER_MM, DEFAULT_FEED_MM_MIN, MAX_FEED_MM_MIN,
              DEFAULT_ACCEL_MM_S2, X_MIN_MM, X_MAX_MM, Y_MIN_MM, Y_MAX_MM);
