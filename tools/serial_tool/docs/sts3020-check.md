@@ -35,7 +35,7 @@ python tools/serial_tool/serial_send.py --port /dev/cu.usbserial-XXXX --csv tool
 2. `PEN_STATUS`: `PEN_STATUS OK id=1 position=...`。これは移動なしの現在位置読出し。
 3. `SELFTEST`: CoreXY計算のチェックのみ。サーボ移動なし。
 4. `PENUP`: 60度相当の目標値を送信し、`PEN UP` を返す。ホーンなしで動作を確認する。
-5. `PEN_STATUS`: 充分に待って実位置が変化したか見る。送信ACKだけでは到達を保証しない。
+5. `PEN_STATUS`: 充分に待って実位置が変化したか見る。ファームウェアは2秒以内に位置誤差35カウント以内の到達を待つ。ペン機構の移動完了と一致するか目視確認する。
 6. `PENDOWN`: 80度相当の目標値へ指令し、実機の動きと位置を観察する。
 7. `M3` / `M5`: G-code経由でPENDOWN/PENUPと同じ経路を使用する。通常描画時に実施。
 8. サーボ未給電/通信断のとき `PEN_STATUS` およびペン指令は `ERROR:`。ジョブ中の送信失敗は継続させない。
@@ -48,7 +48,7 @@ python tools/serial_tool/serial_send.py --port /dev/cu.usbserial-XXXX --csv tool
 - `PEN_STATUS`はOKなのに動かない: ホーンの干渉、モード、電流制限/過負荷、電源電圧降下などを確認する。
 - `CONFIG`でLED disabled: 仕様どおり。GPIO33はNeoPixelに使用できない。
 - `SIMULATION_MODE=1`では外部UARTを初期化しない。位置読み出しは計算上の値になる。
-- `PEN UP` / `PEN DOWN` は指令送信成功を意味し、**実角度到達の保証ではない**。位置FBと目視を併用する。
+- `PEN UP` / `PEN DOWN` はサーボ内蔵エンコーダで目標誤差35カウント以内（最大2秒）を確認できたときに返す。ホーン・ペンの実機移動や干渉の不在は保証しないので、目視で確認する。
 
 ## Unverified on hardware
 
