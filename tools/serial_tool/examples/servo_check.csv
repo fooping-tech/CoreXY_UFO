@@ -1,11 +1,10 @@
 command,delay_ms,expect,comment
-CONFIG,500,PEN=32,Confirm PEN_SERVO_PIN and related config
-TMC_INIT,1000,TMC_INIT,Initialize TMC2209 UART manager
-TMC_STATUS,700,TMC_STATUS,Show TMC2209 status
-POS,500,PEN=UP,Confirm firmware starts with pen up state
-PENDOWN,1000,PEN DOWN,Servo should move to PEN_DOWN_ANGLE_DEG
-POS,500,PEN=DOWN,Confirm firmware state is pen down
-PENUP,1000,PEN UP,Servo should move to PEN_UP_ANGLE_DEG
-POS,500,PEN=UP,Confirm firmware state is pen up
-PENDOWN,1000,PEN DOWN,Repeat pen down to check stable movement
-PENUP,1000,PEN UP,Finish with pen up
+CONFIG,500,STS3020 UART TX=32 RX=33,Confirm UART1 pin ownership and disabled NeoPixel
+PEN_STATUS,500,PEN_STATUS OK,Check half-duplex UART link before any motion
+PENUP,1000,PEN UP,With horn removed move to configured pen-up angle
+PEN_STATUS,500,PEN_STATUS OK,Read current position; allow time for the move
+POS,500,PEN=UP,Requested pen state is up (not verified mechanical position)
+PENDOWN,1000,PEN DOWN,Move to configured pen-down angle
+PEN_STATUS,500,PEN_STATUS OK,Read current position
+POS,500,PEN=DOWN,Requested pen state is down
+PENUP,1000,PEN UP,Finish pen-up
