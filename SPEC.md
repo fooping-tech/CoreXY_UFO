@@ -1209,6 +1209,6 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - UARTの所有者はCore1のPenController。起動時は接続Pingのみで位置指令しない。SIMULATION_MODEではUARTを駆動しない。
 - PEN_STATUSコマンドはPingと現在位置読出しのみで無動作。PENUP/PENDOWNおよびG-code M5/M3は従来の論理インターフェースを維持する。
 - ペン指令はPing確認後に送る。応答なしの場合はERRORをログ出力しpen_down状態を変更しない。ジョブ開始時のpenUp失敗はJOB_BEGINを拒否、JOB_ENDでpenUp失敗した場合はparkしない。
-- 現行の書込み成功は位置指令の転送受理を意味し、サーボの物理的な目標位置到達を保証しない。実際の位置はPEN_STATUSで確認すること。
+- 位置指令後はSTS3020内部エンコーダの位置を20ms間隔で読み、2秒以内に目標から35カウント以内へ到達した場合だけ成功扱い。タイムアウト/読み取り失敗はペン指令失敗とする。サーボ位置到達は外部ペン機構の干渉・破損がないことの保証ではない。
 - `m5stack-core2-hwtest` はSERVO_STATUS、SERVO、PENUP、PENDOWN、SERVO_SWEEPをSTS3020に対応させた。LED_TESTは無効。
 - 詳細は `tools/serial_tool/docs/sts3020-check.md` を参照する。
