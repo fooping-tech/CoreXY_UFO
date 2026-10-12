@@ -6,7 +6,7 @@ SELFTEST,1500,SELFTEST RESULT,Non-motion checks: limit stability / TMC UART / ST
 TMC_PING,800,TMC_PING,UART read only; expect PASS
 TMC_INIT 400,1500,TMC_INIT,Write low-current test profile (400 mA)
 TMC_STATUS,1000,TMC_STATUS DONE,Verify GSTAT/DRV_STATUS flags after init
-LED_TEST,8000,LED_TEST DONE,Watch R/G/B/W then a single white pixel walking the chain
+SERVO_STATUS,700,SERVO_STATUS OK,STS3020 read-only UART diagnostic (no horn attached)
 PENUP,800,PENUP DONE,Servo to pen-up angle
 PENDOWN,800,PENDOWN DONE,Servo to pen-down angle
 SERVO_SWEEP,8000,SERVO_SWEEP DONE,Servo sweeps between pen-up and pen-down angles
