@@ -27,6 +27,7 @@ constexpr CommandEntry CORE1_COMMANDS[] = {
     {"MOTOR", HwCommandType::MOTOR},
     {"STOP", HwCommandType::STOP},
     {"SERVO", HwCommandType::SERVO},
+    {"SERVO_STATUS", HwCommandType::SERVO_STATUS},
     {"PENUP", HwCommandType::PENUP},
     {"PENDOWN", HwCommandType::PENDOWN},
     {"SERVO_SWEEP", HwCommandType::SERVO_SWEEP},
@@ -49,8 +50,8 @@ void printHelp() {
   logMessage("  MOTOR <A|B> [steps] [steps_s] single motor move (|steps|<=%ld)",
              static_cast<long>(HWTEST_MOTOR_MAX_STEPS));
   logMessage("  STOP                          stop motors / abort watch");
-  logMessage("  PENUP | PENDOWN | SERVO <deg> | SERVO_SWEEP");
-  logMessage("  LED <r> <g> <b> | LED_TEST | LED_OFF");
+  logMessage("  SERVO_STATUS | PENUP | PENDOWN | SERVO <deg> | SERVO_SWEEP");
+  logMessage("  LED commands DISABLED (GPIO33 is STS3020 UART RX)");
   logMessage("HELP DONE");
 }
 
@@ -65,9 +66,11 @@ void printInfo() {
              TMC_B_UART_ADDRESS, TMC_R_SENSE_OHM);
   logMessage("INFO LIMIT X=%u Y=%u active_low=%s", X_LIMIT_PIN, Y_LIMIT_PIN,
              LIMIT_ACTIVE_LOW ? "YES" : "NO");
-  logMessage("INFO SERVO=%u up=%u down=%u  NEOPIXEL=%u count=%u", PEN_SERVO_PIN,
-             PEN_UP_ANGLE_DEG, PEN_DOWN_ANGLE_DEG, NEOPIXEL_PIN,
-             NEOPIXEL_LED_COUNT);
+  logMessage("INFO STS3020 UART TX=%u RX=%u baud=%lu ID=%u up=%u down=%u NeoPixel=%s",
+             PEN_SERVO_UART_TX_PIN, PEN_SERVO_UART_RX_PIN,
+             static_cast<unsigned long>(PEN_SERVO_UART_BAUD),
+             PEN_SERVO_ID, PEN_UP_ANGLE_DEG, PEN_DOWN_ANGLE_DEG,
+             NEOPIXEL_ENABLED ? "ENABLED" : "DISABLED");
   logMessage("INFO DONE");
 }
 
@@ -92,6 +95,12 @@ void handleLine(char* line) {
     return printInfo();
   }
   if (strcmp(name, "POWER") == 0) return requestHwPowerReport();
+  if (!NEOPIXEL_ENABLED && (strcmp(name, "LED_TEST") == 0 ||
+                            strcmp(name, "LED_OFF") == 0 ||
+                            strcmp(name, "LED") == 0)) {
+    logMessage("ERROR: NeoPixel disabled; GPIO33 reserved for STS3020 RX");
+    return;
+  }
   if (strcmp(name, "LED_TEST") == 0) return requestHwLed(HwLedRequest::TEST);
   if (strcmp(name, "LED_OFF") == 0) return requestHwLed(HwLedRequest::OFF);
   if (strcmp(name, "LED") == 0) {
