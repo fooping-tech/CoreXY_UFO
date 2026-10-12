@@ -150,6 +150,10 @@ constexpr uint8_t PEN_SERVO_ID = 1;
 constexpr uint32_t PEN_SERVO_UART_BAUD = 1000000;
 constexpr uint16_t PEN_SERVO_SPEED = 300;
 constexpr uint8_t PEN_SERVO_ACCELERATION = 20;
+// Stop after a bounded delay instead of allowing XY to start with an unknown pen position.
+constexpr uint32_t PEN_SERVO_MOVE_TIMEOUT_MS = 2000;
+constexpr uint16_t PEN_SERVO_POSITION_TOLERANCE = 35;  // ~3 degrees
+
 constexpr uint16_t PEN_SERVO_MAX_POSITION = 4095;
 constexpr unsigned PEN_SERVO_FULL_TURN_DEG = 360;
 
