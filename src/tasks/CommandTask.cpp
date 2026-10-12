@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "AppContext.h"
 #include "CommandDispatcher.h"
+#include "Core2PinMap.h"
 
 namespace {
 bool isLedCommand(CommandType type) {
@@ -59,6 +60,8 @@ void commandTask(void*) {
             } else {
               logMessage("ACK QUEUED %s", command.name);
             }
+          } else if (isLedCommand(command.type) && !NEOPIXEL_ENABLED) {
+            logMessage("ERROR: NeoPixel disabled; GPIO33 reserved for STS3020 RX");
           } else if (isLedCommand(command.type) &&
                      xQueueSend(led_command_queue, &command.led, 0) != pdTRUE) {
             logMessage("ERROR: LedCommandQueue full");
