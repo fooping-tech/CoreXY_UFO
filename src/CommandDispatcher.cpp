@@ -86,6 +86,7 @@ CommandMessage CommandDispatcher::parse(const char* line) {
   else if (strcmp(name, "ZERO") == 0) command.type = CommandType::ZERO;
   else if (strcmp(name, "PENUP") == 0) command.type = CommandType::PEN_UP;
   else if (strcmp(name, "PENDOWN") == 0) command.type = CommandType::PEN_DOWN;
+  else if (strcmp(name, "PEN_STATUS") == 0) command.type = CommandType::PEN_STATUS;
   else if (strcmp(name, "SELFTEST") == 0) command.type = CommandType::SELFTEST;
   else if (strcmp(name, "TMC_INIT") == 0) command.type = CommandType::TMC_INIT;
   else if (strcmp(name, "TMC_STATUS") == 0) command.type = CommandType::TMC_STATUS;
