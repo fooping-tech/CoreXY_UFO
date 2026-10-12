@@ -2366,6 +2366,7 @@ Codexは勝手に実装しないこと。
 - [x] FTServo SMS_STSをPenControllerの内部に封じ込め、PWM出力を撤去
 - [x] PENUP/PENDOWN/M3/M5を維持、PEN_STATUS無動作診断を追加
 - [x] 起動時の自動サーボ駆動禁止、通信失敗時のペン状態更新防止
+- [x] ペン位置指令後の内蔵エンコーダ目標位置確認（2秒timeout/35カウント許容）
 - [x] JOB_BEGIN/JOB_ENDにサーボ通信失敗の拒否/停止処理を追加
 - [x] GPIO33 NeoPixel出力停止、LEDコマンドを無効化、HWTESTにも適用
 - [x] 検査CSV/配線手順/仕様書を更新
