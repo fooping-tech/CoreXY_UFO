@@ -10,9 +10,9 @@ void Diagnostics::printHelp() {
   logMessage("HELP CONFIG POS ZERO TEST_A <steps> TEST_B <steps> AB_TIMED <a_steps> <b_steps> <duration_us>");
   logMessage("XY <x_mm> <y_mm> [feed_mm_min] HOME HOME_X HOME_Y HOME_STATUS LIMIT_STATUS ALARM_CLEAR ABORT");
   logMessage("JOB_BEGIN JOB_END JOB_ABORT JOB_STATUS");
-  logMessage("PENUP PENDOWN SELFTEST TMC_INIT TMC_STATUS");
+  logMessage("PENUP PENDOWN PEN_STATUS SELFTEST TMC_INIT TMC_STATUS");
   logMessage("G0/G1 X Y F G4 P<ms> G20 G21 G28 G90 G91 M3 M5 M114");
-  logMessage("LED <r> <g> <b> LED_PIXEL <index> <r> <g> <b> LED_OFF LED_AUTO <0|1> LED_STATUS");
+  logMessage("NeoPixel commands DISABLED (GPIO33 used by STS3020 UART RX)");
   logMessage("LED_PATTERN <OFF|SOLID|PACIFICA|FIRE|BREATH|CHASE|PROGRESS|ALERT|SUCCESS>");
   logMessage("LED_STATUS_SET <IDLE|HOMING|DRAWING_PEN_UP|DRAWING_PEN_DOWN|PROCESSING|PAUSED|COMPLETED|WARNING|ERROR>");
   logMessage("LED_BRIGHTNESS <value> LED_PARAM <name> <value> MELODY");
@@ -26,9 +26,12 @@ void Diagnostics::printConfig() {
   logMessage("TMC UART TX=%u RX=%u baud=%lu A.address=%u B.address=%u",
              TMC_UART_TX_PIN, TMC_UART_RX_PIN, TMC_UART_BAUD,
              TMC_A_UART_ADDRESS, TMC_B_UART_ADDRESS);
-  logMessage("LIMIT X=%u Y=%u PEN=%u NEOPIXEL=%u count=%u brightness_max=%u",
-             X_LIMIT_PIN, Y_LIMIT_PIN, PEN_SERVO_PIN, NEOPIXEL_PIN,
-             NEOPIXEL_LED_COUNT, NEOPIXEL_BRIGHTNESS_MAX);
+  logMessage("LIMIT X=%u Y=%u STS3020 UART TX=%u RX=%u baud=%lu ID=%u up=%u down=%u NeoPixel=%s",
+             X_LIMIT_PIN, Y_LIMIT_PIN, PEN_SERVO_UART_TX_PIN,
+             PEN_SERVO_UART_RX_PIN,
+             static_cast<unsigned long>(PEN_SERVO_UART_BAUD),
+             PEN_SERVO_ID, PEN_UP_ANGLE_DEG, PEN_DOWN_ANGLE_DEG,
+             NEOPIXEL_ENABLED ? "ENABLED" : "DISABLED");
   logMessage("MOTION steps_per_mm=%.3f default_feed=%.3f max_feed=%.3f accel=%.3f soft_limit X=[%.3f,%.3f] Y=[%.3f,%.3f]",
              STEPS_PER_MM, DEFAULT_FEED_MM_MIN, MAX_FEED_MM_MIN,
              DEFAULT_ACCEL_MM_S2, X_MIN_MM, X_MAX_MM, Y_MIN_MM, Y_MAX_MM);
