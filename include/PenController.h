@@ -3,7 +3,8 @@
 #include <stdint.h>
 
 // Core 1 owned FEETECH STS3020 position controller.
-// Commands report transport success, not physical motion completion.
+// Commands wait for encoder feedback within a bounded timeout.
+// Encoder arrival does not establish that the external pen mechanism is clear.
 class PenController {
  public:
   bool begin();
