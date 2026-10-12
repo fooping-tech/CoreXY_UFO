@@ -1,3 +1,5 @@
+> **現行Core2 + STS3020構成では使用不可。** GPIO33はSTS3020 UART RXに占有されています。NeoPixel配線は外してください。ファームウェアはLEDコマンドをERRORとして拒否します。以下は旧PWMサーボ構成の記録です。
+
 # LED Check
 
 外付けNEOPIXELの配線、色順、輝度、単独pixel指定、patternを確認するチェックです。
