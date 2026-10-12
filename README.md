@@ -62,7 +62,7 @@ readyの場合だけ明示実行します。終了または中断時には通常
 KST32BストロークフォントデータからG-codeを生成します。InkscapeやHershey Textには
 依存しません。詳細は[tools/text_tool/README.md](tools/text_tool/README.md)を参照してください。
 
-詳細: [STS3020接続・単体確認](tools/serial_tool/docs/sts3020-check.md)。サーボの初期ID=1、初期通信速度=1Mbps、0..360度と0..4095の角度換算を想定します。位置指令の送信成功は実際の動作完了確認ではありません。
+詳細: [STS3020接続・単体確認](tools/serial_tool/docs/sts3020-check.md)。サーボの初期ID=1、初期通信速度=1Mbps、0..360度と0..4095の角度換算を想定します。位置指令後に最大2秒間、実位置の誤差35カウント以内を確認します。ただしサーボ内部エンコーダの位置確認であり、ペン機構の接触・干渉がないことは保証しません。
 
 ## Known limitations
 
