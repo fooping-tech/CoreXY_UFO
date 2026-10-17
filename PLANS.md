@@ -2010,6 +2010,40 @@ KST32Bストロークフォントデータをホスト側で読み、日本語�
 
 - 初回のY homingがswitchから離れた原因は未特定(再現せず)。候補は(1)開始時Y limitがON判定されBackoff(最大`HOMING_START_BACKOFF_MM`=40mm)へ入った(新PCBのpull-up、配線接触)、(2)正常なBackoff動作の誤認。再発時は`HOME_Y started`行と`LIMIT_ON_AT_START`有無を記録する。
 
+## 12.14 キャンバスサイズ暫定変更 (X 500 / Y 250mm)
+
+作業範囲を`X 0-60 / Y 0-55mm`から暫定で`X 0-500 / Y 0-300mm`へ拡大後、Yを`0-250mm`へ変更した。
+
+- [x] `X_MAX_MM=500`、`Y_MAX_MM=250`(soft limit、UI jog clamp、`JOB_END`退避Y=245mmに連動)
+- [x] `HOMING_MAX_TRAVEL_X_MM=550`、`HOMING_MAX_TRAVEL_Y_MM=300`(作業範囲・実ストロークより大きくする)
+- [x] WebUI `SOFT_LIMIT`とtext tool呼び出しの`--max-x/--max-y`を500/250へ変更
+- [ ] 実機: ペン先が実際にX 500 / Y 250mmまで機構干渉なく動けるか確認
+- [ ] 実機: 遠端からの`HOME`完了(1200mm/minで最大約28s)を確認
+- [ ] 実機: 長距離`XY`で脱調がないことを確認
+
+未解決リスク:
+
+- 実機ストロークがX 500 / Y 250mm未満の場合、soft limit内でも枠に衝突する。確認後に実測値から余裕を引いた値へ再設定する。
+- 長距離移動での発熱・脱調、ベルト張力の影響は未確認。
+
+## 12.15 LCDテストモード
+
+画面UIからBtnB長押しで入るテストモードを通常ファームウェアへ追加した(方向・モータ単体、limit・TMC診断)。
+
+- [x] `DiagnosticsState`を追加し`StatusMessage.diagnostics`でCore 0へ渡す
+- [x] `SELFTEST`結果、`TMC_STATUS`時の`TMC_DIAG` A/B summary、単独モータテスト結果を記録
+- [x] UIからの`TEST_A`/`TEST_B`に低速feed(`TEST_MODE_MOTOR_FEED_MM_MIN`)を付与
+- [x] UiTaskにMOTOR/DIAGページ、BtnB長押しの入退場、job開始時の自動退出を追加
+- [x] UI `STOP`で`requestMotionAbort()`を呼ぶよう修正(従来はキュー投入のみで移動中に即停止しなかった)
+- [x] `test_mode_check.csv`と`test-mode-check.md`を追加
+- [x] `pio run -e m5stack-core2`、native motion tests
+- [ ] 実機: BtnB長押しで入退場、DIAG表示(limit/SELFTEST/TMC)、MOTOR方向、STOP中断を確認
+
+未解決リスク:
+
+- `m5stack-core2-sim` / `-hwtest` envは、`lib_deps`のFastLEDがバージョン未固定のため新規取得された3.10.7でコンパイルエラーになる(本変更とは無関係、通常envは3.10.6で成功)。`fastled/FastLED@3.10.6`への固定を検討する。
+- TMC DRV_STATUSのopen load(ola/olb)は静止中に誤検出しうるためUIでは表示しない。
+
 ---
 
 # 13. Codex用プロンプト

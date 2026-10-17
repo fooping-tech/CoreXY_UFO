@@ -349,9 +349,9 @@ MotorMelodyController
 | `DEFAULT_ACCEL_MM_S2` | `100.0f` |
 | `DEFAULT_MOTOR_ACCEL_STEPS_S2` | `round(DEFAULT_ACCEL_MM_S2 * STEPS_PER_MM * COREXY_MAX_MOTOR_GAIN)` |
 | `X_MIN_MM` | `0.0f` |
-| `X_MAX_MM` | `55.0f` |
+| `X_MAX_MM` | `500.0f` |
 | `Y_MIN_MM` | `0.0f` |
-| `Y_MAX_MM` | `55.0f` |
+| `Y_MAX_MM` | `250.0f` |
 | `SERIAL_BAUD` | `115200` |
 | `TMC_UART_BAUD` | `115200` |
 | `DIR_CHANGE_DELAY_US` | `200` |
@@ -1188,6 +1188,25 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - `MOTOR_A/B_DIRECTION_INVERTED`は入替後の論理A/Bに適用する。
 - `true`のとき、`TEST_A`/`MELODY`(論理A)は物理ドライバB(UARTアドレス1)側で動く。`TMC_STATUS`のA/Bは物理ドライバ表記のまま。
 - `CONFIG`は`MOTOR ab_swapped=<0|1> a_inverted=<0|1> b_inverted=<0|1>`を表示する。
+
+## 21.4 LCDテストモード
+
+通常ファームウェアのCore2 UIに、PC無しで方向・limit・TMCを確認する専用テストモードを持つ。手順は`tools/serial_tool/docs/test-mode-check.md`。
+
+| 項目 | 内容 |
+|---|---|
+| 入る/抜ける | BtnBを`TEST_MODE_HOLD_MS`(1500ms)長押し。抜けるのは再長押しまたは`EXIT`タブ |
+| 入場条件 | motion/homing/job実行中でないこと。job開始時は自動で抜ける |
+| MOTORページ | `A+/A-/B+/B-`単独モータ移動、`STEP`(80/400/1600 steps)、`STOP`、limit/HOME表示、最後の結果 |
+| DIAGページ | limit X/Yのdebounced/raw表示、`SELFTEST`、`TMC INIT`、`TMC STATUS`、TMC A/B診断パネル |
+
+追加仕様・制約:
+
+- UIはCore 0。テスト操作は既存`CommandType`(`TEST_A`/`TEST_B`/`SELFTEST`/`TMC_INIT`/`TMC_STATUS`/`ABORT`)を`CommandQueue`へ入れるだけで、モータ・TMCを直接触らない。
+- UIからの`TEST_A`/`TEST_B`は`feed_mm_min=TEST_MODE_MOTOR_FEED_MM_MIN`(600mm/min相当)を付け、`moveABSteps()`で片側0 stepとして実行する。Serialの`TEST_A`/`TEST_B`(feed無し)は従来通りbackendの現在速度で動く。単独モータ移動はHOMEDを解除する。
+- 診断結果はCore 1の`DiagnosticsState`(`selftest_result`、TMC A/B summary、`last_motor_test`)に保持し、`StatusMessage.diagnostics`でCore 0へ渡す。
+- `TMC_STATUS`は従来出力に加え`Diagnostics::runTmcDiagnostics()`で`TMC2209Manager::readDiagnostics()`を呼び、`TMC_DIAG A|B ... result=OK|NG`を出力する。OK条件はUART接続OK、version 0x21、DRV_STATUSのot/short無し、GSTAT drv_err無し。otpwとuv_cpは警告扱い。モーション中は実行しない。
+- UIの`STOP`(CTRLページ含む)はSerial `ABORT`と同じく`requestMotionAbort()`を先に呼んでから`ABORT`をキューへ入れる。
 
 ## 22. 受け入れ条件
 

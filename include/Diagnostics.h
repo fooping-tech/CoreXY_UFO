@@ -10,4 +10,6 @@ class Diagnostics {
   static void printLimitStatus(const StatusMessage& status);
   static void printHomingStatus(const StatusMessage& status);
   static bool runSelfTest();
+  // Low-frequency TMC2209 UART diagnostics. Do not call while moving.
+  static bool runTmcDiagnostics();
 };

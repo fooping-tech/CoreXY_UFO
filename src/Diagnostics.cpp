@@ -117,9 +117,59 @@ bool Diagnostics::runSelfTest() {
                  test.current_x, test.current_y, test.target_x, test.target_y,
                  delta.a_steps, delta.b_steps, test.expected_a,
                  test.expected_b);
+      diagnostics_state.selftest_result = 0;
+      publishStatus();
       return false;
     }
   }
   logMessage("SELFTEST PASS");
+  diagnostics_state.selftest_result = 1;
+  publishStatus();
   return true;
+}
+
+namespace {
+// TMC2209 datasheet: DRV_STATUS / GSTAT bit positions.
+constexpr uint32_t kDrvStatusOtpw = 1UL << 0;
+constexpr uint32_t kDrvStatusOt = 1UL << 1;
+constexpr uint32_t kDrvStatusShortMask = (1UL << 2) | (1UL << 3) |
+                                         (1UL << 4) | (1UL << 5);
+constexpr uint8_t kGstatDrvErr = 1U << 1;
+constexpr uint8_t kGstatUvCp = 1U << 2;
+constexpr uint8_t kTmc2209Version = 0x21;
+
+bool readTmcSummary(TMC2209Axis axis, const char* name,
+                    TmcDriverSummary& summary) {
+  TMC2209Diagnostics raw;
+  const bool connected = tmc_manager.readDiagnostics(axis, raw);
+  summary = TmcDriverSummary{};
+  summary.checked = true;
+  summary.connection = raw.connection;
+  summary.version = raw.version;
+  if (connected) {
+    summary.over_temp = (raw.drv_status & kDrvStatusOt) != 0;
+    summary.over_temp_warn = (raw.drv_status & kDrvStatusOtpw) != 0;
+    summary.short_detected = (raw.drv_status & kDrvStatusShortMask) != 0;
+    summary.driver_error = (raw.gstat & kGstatDrvErr) != 0;
+    summary.undervoltage = (raw.gstat & kGstatUvCp) != 0;
+  }
+  const bool ok = connected && summary.version == kTmc2209Version &&
+                  !summary.over_temp && !summary.short_detected &&
+                  !summary.driver_error;
+  logMessage("TMC_DIAG %s address=%u connection=%u version=0x%02X gstat=0x%02X drv_status=0x%08lX ot=%u otpw=%u short=%u drv_err=%u uv_cp=%u result=%s",
+             name, raw.address, raw.connection, raw.version, raw.gstat,
+             static_cast<unsigned long>(raw.drv_status), summary.over_temp,
+             summary.over_temp_warn, summary.short_detected,
+             summary.driver_error, summary.undervoltage, ok ? "OK" : "NG");
+  return ok;
+}
+}
+
+bool Diagnostics::runTmcDiagnostics() {
+  const bool ok_a =
+      readTmcSummary(TMC2209Axis::A, "A", diagnostics_state.tmc_a);
+  const bool ok_b =
+      readTmcSummary(TMC2209Axis::B, "B", diagnostics_state.tmc_b);
+  publishStatus();
+  return ok_a && ok_b;
 }

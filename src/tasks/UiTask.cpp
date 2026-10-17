@@ -13,6 +13,12 @@ enum class UiPage : uint8_t {
   DETAIL,
 };
 
+// BtnB長押しで入る専用テストモードのページ。
+enum class TestPage : uint8_t {
+  MOTOR,
+  DIAG,
+};
+
 struct Rect {
   int16_t x;
   int16_t y;
@@ -31,6 +37,7 @@ constexpr uint16_t COLOR_YELLOW = 0xFEA0;
 constexpr uint16_t COLOR_RED = 0xF946;
 constexpr uint16_t COLOR_BLUE = 0x3D7F;
 constexpr uint16_t COLOR_DISABLED = 0x4A69;
+constexpr uint16_t COLOR_ORANGE = 0xFC60;
 
 constexpr float UI_JOG_STEP_MM = 1.0f;
 constexpr float UI_JOG_FEED_MM_MIN = 900.0f;
@@ -45,6 +52,29 @@ LovyanGFX* ui_gfx = &M5.Display;
 float ui_jog_base_x_mm = 0.0f;
 float ui_jog_base_y_mm = 0.0f;
 bool ui_have_jog_base = false;
+bool test_mode = false;
+TestPage test_page = TestPage::MOTOR;
+uint8_t test_step_index = TEST_MODE_MOTOR_STEP_DEFAULT_INDEX;
+constexpr uint8_t kTestStepOptionCount =
+    sizeof(TEST_MODE_MOTOR_STEP_OPTIONS) /
+    sizeof(TEST_MODE_MOTOR_STEP_OPTIONS[0]);
+
+// Test mode layout.
+constexpr Rect kTestLimitStrip{10, 42, 300, 24};
+constexpr Rect kTestAPlus{10, 72, 145, 38};
+constexpr Rect kTestAMinus{165, 72, 145, 38};
+constexpr Rect kTestBPlus{10, 116, 145, 38};
+constexpr Rect kTestBMinus{165, 116, 145, 38};
+constexpr Rect kTestStep{10, 160, 145, 28};
+constexpr Rect kTestStop{165, 160, 145, 28};
+constexpr Rect kDiagLimitX{10, 42, 145, 40};
+constexpr Rect kDiagLimitY{165, 42, 145, 40};
+constexpr Rect kDiagSelftest{10, 88, 94, 28};
+constexpr Rect kDiagTmcInit{113, 88, 94, 28};
+constexpr Rect kDiagTmcStatus{216, 88, 94, 28};
+constexpr Rect kDiagSummary{10, 122, 300, 22};
+constexpr Rect kDiagTmcA{10, 150, 145, 58};
+constexpr Rect kDiagTmcB{165, 150, 145, 58};
 
 LovyanGFX& gfx() {
   return *ui_gfx;
@@ -123,8 +153,18 @@ void drawHeader(const StatusMessage& status) {
   gfx().drawString("CoreXY", 10, 8);
 
   gfx().setTextSize(1);
-  gfx().setTextColor(COLOR_MUTED, COLOR_BG);
-  gfx().drawString(pageName(current_page), 82, 14);
+  if (test_mode) {
+    gfx().fillRoundRect(80, 9, 110, 18, 9, COLOR_ORANGE);
+    gfx().setTextColor(COLOR_BG, COLOR_ORANGE);
+    gfx().setTextDatum(middle_center);
+    gfx().drawString(test_page == TestPage::MOTOR ? "TEST: MOTOR"
+                                                  : "TEST: DIAG",
+                     135, 18);
+    gfx().setTextDatum(top_left);
+  } else {
+    gfx().setTextColor(COLOR_MUTED, COLOR_BG);
+    gfx().drawString(pageName(current_page), 82, 14);
+  }
 
   const Rect pill{218, 6, 92, 22};
   gfx().fillRoundRect(pill.x, pill.y, pill.w, pill.h, 11,
@@ -143,7 +183,21 @@ void drawFooter() {
                        {222, y + 3, 86, 20}};
   const UiPage pages[] = {UiPage::STATUS, UiPage::CONTROL, UiPage::DETAIL};
   const char* names[] = {"STAT", "CTRL", "INFO"};
+  const char* test_names[] = {"MOTOR", "DIAG", "EXIT"};
   for (uint8_t i = 0; i < 3; ++i) {
+    if (test_mode) {
+      const bool active = (i == 0 && test_page == TestPage::MOTOR) ||
+                          (i == 1 && test_page == TestPage::DIAG);
+      const uint16_t fill =
+          active ? COLOR_ORANGE : (i == 2 ? COLOR_RED : COLOR_PANEL_2);
+      gfx().fillRoundRect(tabs[i].x, tabs[i].y, tabs[i].w, tabs[i].h, 10,
+                          fill);
+      gfx().setTextColor(active ? COLOR_BG : COLOR_TEXT, fill);
+      gfx().setTextDatum(middle_center);
+      gfx().drawString(test_names[i], tabs[i].x + tabs[i].w / 2,
+                       tabs[i].y + tabs[i].h / 2);
+      continue;
+    }
     const bool active = current_page == pages[i];
     gfx().fillRoundRect(tabs[i].x, tabs[i].y, tabs[i].w, tabs[i].h, 10,
                              active ? COLOR_ACCENT : COLOR_PANEL_2);
@@ -277,24 +331,165 @@ void drawDetailPage(const StatusMessage& status) {
            status.x_limit_raw_active ? "ON" : "OFF",
            status.y_limit_active ? "ON" : "OFF",
            status.y_limit_raw_active ? "ON" : "OFF");
-  gfx().drawString(value, 160, 202);
+  gfx().drawString(value, 160, 196);
+  gfx().setTextColor(COLOR_ORANGE, COLOR_BG);
+  gfx().drawString("Hold center button: TEST MODE", 160, 208);
   gfx().setTextDatum(top_left);
+}
+
+// テストモード中のコマンド実行可否。モーション/homing/ジョブ中は新規テストを出さない。
+bool canRunTest(const MachineState& state) {
+  return !state.motion_active && !state.homing_active && !state.job_active;
+}
+
+bool canRunMotorTest(const MachineState& state) {
+  return canRunTest(state) && !state.alarmed;
+}
+
+void drawLimitIndicator(const Rect& rect, const char* label, uint8_t gpio,
+                        bool active, bool raw_active) {
+  const uint16_t color = active ? COLOR_RED : COLOR_GREEN;
+  drawRoundPanel(rect);
+  char text[32] = {};
+  gfx().setTextSize(1);
+  gfx().setTextColor(COLOR_MUTED, COLOR_PANEL);
+  snprintf(text, sizeof(text), "%s GPIO%u", label, gpio);
+  gfx().drawString(text, rect.x + 8, rect.y + 6);
+  snprintf(text, sizeof(text), "raw %s", raw_active ? "ON" : "OFF");
+  gfx().setTextDatum(top_right);
+  gfx().drawString(text, rect.x + rect.w - 8, rect.y + 6);
+  gfx().setTextDatum(top_left);
+  gfx().setTextSize(2);
+  gfx().setTextColor(color, COLOR_PANEL);
+  gfx().drawString(active ? "ON" : "OFF", rect.x + 8, rect.y + 20);
+  gfx().setTextSize(1);
+}
+
+void drawTestMotorPage(const StatusMessage& status) {
+  const MachineState& state = status.machine;
+  const bool enabled = canRunMotorTest(state);
+  char text[48] = {};
+
+  const bool any_limit = status.x_limit_active || status.y_limit_active;
+  drawRoundPanel(kTestLimitStrip, any_limit ? COLOR_RED : COLOR_PANEL);
+  snprintf(text, sizeof(text), "LIMIT X:%s  Y:%s   HOME:%s",
+           status.x_limit_active ? "ON" : "OFF",
+           status.y_limit_active ? "ON" : "OFF", state.homed ? "OK" : "--");
+  drawTextInRect(text, kTestLimitStrip, COLOR_TEXT, 1);
+
+  // A=X+Y, B=X-Y。単独モータ移動はXY対角へ動く。
+  drawButton(kTestAPlus, "A+  (+X +Y)", COLOR_BLUE, enabled, 1);
+  drawButton(kTestAMinus, "A-  (-X -Y)", COLOR_BLUE, enabled, 1);
+  drawButton(kTestBPlus, "B+  (+X -Y)", COLOR_ACCENT, enabled, 1);
+  drawButton(kTestBMinus, "B-  (-X +Y)", COLOR_ACCENT, enabled, 1);
+
+  snprintf(text, sizeof(text), "STEP %ld",
+           static_cast<long>(TEST_MODE_MOTOR_STEP_OPTIONS[test_step_index]));
+  drawButton(kTestStep, text, COLOR_PANEL_2, true, 1);
+  drawButton(kTestStop, "STOP", COLOR_RED, true, 1);
+
+  gfx().setTextColor(COLOR_MUTED, COLOR_BG);
+  gfx().setTextDatum(middle_center);
+  if (state.alarmed) {
+    snprintf(text, sizeof(text), "ALARM: clear on CTRL page");
+  } else if (status.diagnostics.last_motor_test[0] == '\0') {
+    snprintf(text, sizeof(text), "Motor test clears HOME");
+  } else {
+    snprintf(text, sizeof(text), "Last: %s",
+             status.diagnostics.last_motor_test);
+  }
+  gfx().drawString(text, 160, 200);
+  gfx().setTextDatum(top_left);
+}
+
+void drawTmcPanel(const Rect& rect, const char* name, uint8_t address,
+                  const TmcDriverSummary& tmc) {
+  drawRoundPanel(rect);
+  char text[40] = {};
+  gfx().setTextSize(1);
+  gfx().setTextColor(COLOR_MUTED, COLOR_PANEL);
+  snprintf(text, sizeof(text), "TMC %s  addr %u", name, address);
+  gfx().drawString(text, rect.x + 8, rect.y + 6);
+
+  if (!tmc.checked) {
+    gfx().setTextColor(COLOR_MUTED, COLOR_PANEL);
+    gfx().drawString("not checked", rect.x + 8, rect.y + 24);
+    return;
+  }
+  if (tmc.connection != 0) {
+    gfx().setTextColor(COLOR_RED, COLOR_PANEL);
+    snprintf(text, sizeof(text), "UART NG (code %u)", tmc.connection);
+    gfx().drawString(text, rect.x + 8, rect.y + 24);
+    return;
+  }
+  gfx().setTextColor(tmc.version == 0x21 ? COLOR_GREEN : COLOR_YELLOW,
+                     COLOR_PANEL);
+  snprintf(text, sizeof(text), "UART OK  ver 0x%02X", tmc.version);
+  gfx().drawString(text, rect.x + 8, rect.y + 24);
+
+  const bool fatal = tmc.over_temp || tmc.short_detected || tmc.driver_error;
+  const bool warn = tmc.over_temp_warn || tmc.undervoltage;
+  if (!fatal && !warn) {
+    gfx().setTextColor(COLOR_GREEN, COLOR_PANEL);
+    gfx().drawString("DRV OK", rect.x + 8, rect.y + 40);
+    return;
+  }
+  snprintf(text, sizeof(text), "%s%s%s%s%s", tmc.over_temp ? "OT " : "",
+           tmc.over_temp_warn ? "OTPW " : "",
+           tmc.short_detected ? "SHORT " : "",
+           tmc.driver_error ? "DRV_ERR " : "",
+           tmc.undervoltage ? "UV" : "");
+  gfx().setTextColor(fatal ? COLOR_RED : COLOR_YELLOW, COLOR_PANEL);
+  gfx().drawString(text, rect.x + 8, rect.y + 40);
+}
+
+void drawTestDiagPage(const StatusMessage& status) {
+  const MachineState& state = status.machine;
+  const bool enabled = canRunTest(state);
+  drawLimitIndicator(kDiagLimitX, "LIMIT X", X_LIMIT_PIN,
+                     status.x_limit_active, status.x_limit_raw_active);
+  drawLimitIndicator(kDiagLimitY, "LIMIT Y", Y_LIMIT_PIN,
+                     status.y_limit_active, status.y_limit_raw_active);
+
+  drawButton(kDiagSelftest, "SELFTEST", COLOR_BLUE, enabled, 1);
+  drawButton(kDiagTmcInit, "TMC INIT", COLOR_BLUE, enabled, 1);
+  drawButton(kDiagTmcStatus, "TMC STATUS", COLOR_BLUE, enabled, 1);
+
+  const int8_t selftest = status.diagnostics.selftest_result;
+  char text[48] = {};
+  snprintf(text, sizeof(text), "SELFTEST: %s     TMC profile: %s",
+           selftest < 0 ? "--" : selftest > 0 ? "PASS" : "FAIL",
+           state.tmc_ready ? "READY" : "OFF");
+  drawRoundPanel(kDiagSummary);
+  drawTextInRect(text, kDiagSummary,
+                 selftest == 0 ? COLOR_RED : COLOR_TEXT, 1);
+
+  drawTmcPanel(kDiagTmcA, "A", TMC_A_UART_ADDRESS, status.diagnostics.tmc_a);
+  drawTmcPanel(kDiagTmcB, "B", TMC_B_UART_ADDRESS, status.diagnostics.tmc_b);
 }
 
 void drawUi(const StatusMessage& status) {
   gfx().startWrite();
   gfx().fillScreen(COLOR_BG);
   drawHeader(status);
-  switch (current_page) {
-    case UiPage::STATUS:
-      drawStatusPage(status);
-      break;
-    case UiPage::CONTROL:
-      drawControlPage(status);
-      break;
-    case UiPage::DETAIL:
-      drawDetailPage(status);
-      break;
+  if (test_mode) {
+    if (test_page == TestPage::MOTOR) {
+      drawTestMotorPage(status);
+    } else {
+      drawTestDiagPage(status);
+    }
+  } else {
+    switch (current_page) {
+      case UiPage::STATUS:
+        drawStatusPage(status);
+        break;
+      case UiPage::CONTROL:
+        drawControlPage(status);
+        break;
+      case UiPage::DETAIL:
+        drawDetailPage(status);
+        break;
+    }
   }
   drawNotice();
   drawFooter();
@@ -364,6 +559,128 @@ void queueJog(const StatusMessage& status, float dx_mm, float dy_mm) {
   }
 }
 
+// Serial ABORTと同じく、実行中motionを止めるためフラグを先に立ててからキューへ入れる。
+void queueAbort() {
+  requestMotionAbort();
+  queueSimpleCommand(CommandType::ABORT, "ABORT");
+}
+
+void enterTestMode(const MachineState& state) {
+  if (!canRunTest(state)) {
+    setNotice("Busy: cannot enter TEST");
+    return;
+  }
+  test_mode = true;
+  test_page = TestPage::MOTOR;
+  force_redraw = true;
+  logMessage("UI TEST MODE enter");
+  setNotice("TEST MODE");
+}
+
+void exitTestMode(const char* reason) {
+  test_mode = false;
+  force_redraw = true;
+  logMessage("UI TEST MODE exit reason=%s", reason);
+  setNotice("TEST MODE exit");
+}
+
+void queueMotorTest(const MachineState& state, bool motor_a, int8_t sign) {
+  if (!canRunMotorTest(state)) {
+    setNotice(state.alarmed ? "Alarm active" : "Busy");
+    return;
+  }
+  CommandMessage command{};
+  command.type = motor_a ? CommandType::TEST_A : CommandType::TEST_B;
+  snprintf(command.name, sizeof(command.name), "UI_TEST_%c",
+           motor_a ? 'A' : 'B');
+  command.steps = sign * TEST_MODE_MOTOR_STEP_OPTIONS[test_step_index];
+  command.feed_mm_min = TEST_MODE_MOTOR_FEED_MM_MIN;
+  if (queueCommand(command)) {
+    char text[32] = {};
+    snprintf(text, sizeof(text), "TEST_%c %+ld", motor_a ? 'A' : 'B',
+             static_cast<long>(command.steps));
+    setNotice(text);
+  }
+}
+
+void handleTestMotorTouch(const StatusMessage& status, int16_t x, int16_t y) {
+  const MachineState& state = status.machine;
+  if (contains(kTestAPlus, x, y)) {
+    queueMotorTest(state, true, 1);
+  } else if (contains(kTestAMinus, x, y)) {
+    queueMotorTest(state, true, -1);
+  } else if (contains(kTestBPlus, x, y)) {
+    queueMotorTest(state, false, 1);
+  } else if (contains(kTestBMinus, x, y)) {
+    queueMotorTest(state, false, -1);
+  } else if (contains(kTestStep, x, y)) {
+    test_step_index = (test_step_index + 1) % kTestStepOptionCount;
+    force_redraw = true;
+  } else if (contains(kTestStop, x, y)) {
+    queueAbort();
+  }
+}
+
+void handleTestDiagTouch(const StatusMessage& status, int16_t x, int16_t y) {
+  const MachineState& state = status.machine;
+  const bool selftest = contains(kDiagSelftest, x, y);
+  const bool tmc_init = contains(kDiagTmcInit, x, y);
+  const bool tmc_status = contains(kDiagTmcStatus, x, y);
+  if (!selftest && !tmc_init && !tmc_status) return;
+  if (!canRunTest(state)) {
+    setNotice("Busy");
+    return;
+  }
+  if (selftest) {
+    queueSimpleCommand(CommandType::SELFTEST, "SELFTEST");
+  } else if (tmc_init) {
+    queueSimpleCommand(CommandType::TMC_INIT, "TMC_INIT");
+  } else {
+    queueSimpleCommand(CommandType::TMC_STATUS, "TMC_STATUS");
+  }
+}
+
+void handleTestModeTouch(const StatusMessage& status) {
+  if (M5.BtnA.wasClicked()) {
+    test_page = TestPage::MOTOR;
+    force_redraw = true;
+  }
+  if (M5.BtnC.wasClicked()) {
+    test_page = TestPage::DIAG;
+    force_redraw = true;
+  }
+
+  if (M5.Touch.getCount() == 0) return;
+  const auto touch = M5.Touch.getDetail();
+  if (touch.wasFlicked() && abs(touch.distanceX()) > 55 &&
+      abs(touch.distanceX()) > abs(touch.distanceY())) {
+    test_page = touch.distanceX() < 0 ? TestPage::DIAG : TestPage::MOTOR;
+    force_redraw = true;
+    return;
+  }
+  if (!touch.wasClicked()) return;
+
+  const int16_t x = touch.x;
+  const int16_t y = touch.y;
+  if (y >= 214) {
+    if (x < 107) {
+      test_page = TestPage::MOTOR;
+    } else if (x < 214) {
+      test_page = TestPage::DIAG;
+    } else {
+      exitTestMode("exit tab");
+      return;
+    }
+    force_redraw = true;
+    return;
+  }
+  if (test_page == TestPage::MOTOR) {
+    handleTestMotorTouch(status, x, y);
+  } else {
+    handleTestDiagTouch(status, x, y);
+  }
+}
+
 void handleControlTouch(const StatusMessage& status, int16_t x, int16_t y) {
   const MachineState& state = status.machine;
   if (contains({10, 42, 145, 36}, x, y)) {
@@ -389,7 +706,7 @@ void handleControlTouch(const StatusMessage& status, int16_t x, int16_t y) {
   } else if (contains({206, 124, 82, 34}, x, y)) {
     queueJog(status, UI_JOG_STEP_MM, 0.0f);
   } else if (contains({119, 124, 82, 34}, x, y)) {
-    queueSimpleCommand(CommandType::ABORT, "ABORT");
+    queueAbort();
   } else if (contains({10, 178, 94, 30}, x, y)) {
     if (canManualMove(state)) {
       queueSimpleCommand(CommandType::PEN_UP, "PENUP");
@@ -406,6 +723,24 @@ void handleControlTouch(const StatusMessage& status, int16_t x, int16_t y) {
 }
 
 void handleTouch(const StatusMessage& status) {
+  const MachineState& state = status.machine;
+  if (M5.BtnB.wasHold()) {
+    if (test_mode) {
+      exitTestMode("hold");
+    } else {
+      enterTestMode(state);
+    }
+    return;
+  }
+  if (test_mode && state.job_active) {
+    exitTestMode("job active");
+    return;
+  }
+  if (test_mode) {
+    handleTestModeTouch(status);
+    return;
+  }
+
   if (M5.BtnA.wasClicked()) nextPage(-1);
   if (M5.BtnC.wasClicked()) nextPage(1);
 
@@ -453,6 +788,7 @@ void uiTask(void*) {
     M5.Display.setTextFont(1);
     M5.Display.setTextSize(1);
     M5.Display.setTextDatum(top_left);
+    M5.BtnB.setHoldThresh(TEST_MODE_HOLD_MS);
     if (lcd_ready) {
       ui_canvas.setColorDepth(16);
       if (ui_canvas.createSprite(M5.Display.width(), M5.Display.height())) {
