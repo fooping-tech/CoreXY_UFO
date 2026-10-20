@@ -122,6 +122,7 @@ python tools/serial_tool/serial_send.py \
 | [High-Speed Check](docs/high-speed-check.md) | homing後の通常XY移動を上限feed付近で確認 | `examples/high_speed_check.csv`, `examples/high_speed_sweep_check.csv` |
 | [Concentric Squares Check](docs/concentric-squares-check.md) | 動き出し・動き終わりの線歪みを5重正方形で調査 | `examples/concentric_squares_check.csv`, `examples/concentric_squares_clockwise_check.csv`, `examples/concentric_squares_high_speed_check.csv` |
 | [Diagnostic AB_TIMED Square Draw](docs/diagnostic-ab-timed-square-draw.md) | `AB_TIMED`でA/Bを直接timed実行して四角の歪みを比較 | `examples/diagnostic_ab_timed_square_draw.csv` |
+| [STS3020 Standalone Test Check](docs/sts3020-test-check.md) | STS3020単体の通信・微小JOG確認(専用`m5stack-core2-sts3020-test` firmware) | `examples/sts3020_test_check.csv` |
 | [Servo On/Off Check](docs/servo-on-off-check.md) | ペン上げ/下げサーボ角度と配線 | `examples/servo_check.csv` |
 | [LED Check](docs/led-check.md) | NEOPIXEL配線、色、輝度、pattern | `examples/led_check.csv` |
 | [Melody Check](docs/melody-check.md) | TMC UART、Aモータ、診断メロディprofile | `examples/melody_check.csv` |
