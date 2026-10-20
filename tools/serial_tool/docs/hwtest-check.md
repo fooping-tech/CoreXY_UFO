@@ -2,7 +2,7 @@
 
 コントローラPCBを単体で検査するための専用ファームウェア(`m5stack-core2-hwtest` env)と手順です。
 通常のプロッタファームウェアとは別ビルドで、planner/G-code/homingを含みません。
-再利用するのはハードウェアドライバ層(`TMC2209Manager`、`StepperBackendFastAccel`、`PenController`、`NeoPixelController`)だけです。
+再利用するのはハードウェアドライバ層(`TMC2209Manager`、`StepperBackendFastAccel`、`PenController`)だけです。
 
 前提: PCBのピン割り付けは`include/Core2PinMap.h`(AGENTS.md §5)と同じ。
 
@@ -35,7 +35,7 @@ pio run -e m5stack-core2 --target upload
 
 ## 推奨手順
 
-1. VM未接続、USBのみで書き込み → `INFO`、`LIMIT`、`LED_TEST`、`PENUP`/`PENDOWN`
+1. VM未接続、USBのみで書き込み → `INFO`、`LIMIT`。STS3020用に別途7.4V電源を入れ、ホーンを外して`SERVO_STATUS`→`SERVO 60`→`SERVO 64`を確認する
    (TMC2209はVMが無いとUART応答しないので`TMC_PING`はFAILになる)
 2. VM接続、モータ未接続 → `SELFTEST`、`TMC_PING`、`TMC_INIT 400`、`TMC_STATUS`
 3. 電源を切ってモータ接続、可動部を作業範囲中央へ手で移動 → `MOTOR A 400` / `MOTOR B 400`
@@ -70,10 +70,11 @@ python tools/serial_tool/serial_send.py \
 | `TMC_STATUS` | IOIN/GSTAT/DRV_STATUSを読み判定 | なし |
 | `MOTOR <A\|B> [steps] [steps_s]` | 単独モータ移動(既定400 steps/800 steps/s、最大1600 steps/4000 steps/s)。途中で1回DRV_STATUSを読みopen load/shortを確認 | あり |
 | `STOP` | モータ停止、LIMIT_WATCH/SERVO_SWEEP中断 | 停止 |
-| `PENUP` / `PENDOWN` / `SERVO <deg>` / `SERVO_SWEEP` | サーボ | サーボ |
-| `LED <r> <g> <b>` / `LED_TEST` / `LED_OFF` | NEOPIXEL | なし |
+| `SERVO_STATUS` | STS3020応答/実位置読み取り（無動作） | なし |
+| `PENUP` / `PENDOWN` / `SERVO <deg>` / `SERVO_SWEEP` | STS3020 UART指令 | サーボ |
+| `LED <r> <g> <b>` / `LED_TEST` / `LED_OFF` | GPIO33競合のため無効。ERRORを返す | なし |
 
-Core2のタッチボタン: 左=SELFTEST、中=PEN UP/DOWN、右=LED_TEST。LCDに各結果を表示します。
+Core2のタッチボタン: 左=SELFTEST、中=PEN UP/DOWN、右=LED無効（ERROR表示）。LCDに各結果を表示します。
 
 ## 判定
 
@@ -85,7 +86,7 @@ Core2のタッチボタン: 左=SELFTEST、中=PEN UP/DOWN、右=LED_TEST。LCD�
 | TMC_STATUS (init後) | `GSTAT`の`drv_err=0 uv_cp=0`、`DRV_STATUS`の`ot=0 s2ga=0 s2gb=0` |
 | MOTOR | `MOTOR A DONE PASS`、`mid-move ... ola=0 olb=0`、モータが回り、逆符号で戻る |
 | LIMIT_WATCH | 押下/解放でX/Y各2 edge、`bounce=0`が望ましい |
-| LED_TEST | 全灯R→G→B→W、その後白1灯が0番から`NEOPIXEL_LED_COUNT-1`番まで移動 |
+| SERVO_STATUS | `SERVO_STATUS OK id=1 position=...` を表示。サーボは動かない |
 
 ## Troubleshooting
 
@@ -103,10 +104,11 @@ Core2のタッチボタン: 左=SELFTEST、中=PEN UP/DOWN、右=LED_TEST。LCD�
 | `s2ga`/`s2gb`=1 | モータ出力の短絡、配線ミス |
 | `LIMIT_x unstable` | 入力が浮いている(外付けpull-up欠落)、ノイズ |
 | `LIMIT_x active while idle` | スイッチ押下中、NO/NC取り違え、`LIMIT_ACTIVE_LOW`と回路の不一致 |
-| LEDが途中から点かない | その番号のLEDのDIN/DOUT間の断線、`NEOPIXEL_LED_COUNT`設定 |
+| LED_TESTが拒否される | 仕様どおり。GPIO33はSTS3020 UART RXに割り当て済み |
 
 ## Notes
 
+- STS3020はGPIO32(TX)/GPIO33(RX)のSerial1、UART変換基板、外部7.4V電源が必須。従来のPWMサーボと外部NeoPixel配線は接続しない。詳細は[STS3020 Check](sts3020-check.md)。
 - TMC2209のENはGND固定なので、**VMを入れた瞬間からモータは励磁される**。UART未設定時はVrefとMS1/MS2(=アドレスピン)に従う standalone動作になる。
 - STEP/DIRの静的出力(`PIN_CHECK`/`PIN_SET`)は最初の`MOTOR`実行前のみ使える。`MOTOR`後はピンがFastAccelStepperへ移るため、再度使うにはリセットする。
 - STEPパルス列はFastAccelStepperだけが生成する。hwtestは静的レベル以外を直接出さない。

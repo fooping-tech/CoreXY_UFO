@@ -71,7 +71,7 @@ Core2はESP32を搭載しており、2Core構成である。
 | GPIO1 / GPIO3 | USB Serial。STEP/DIR/ENに使わない |
 | GPIO34 / GPIO35 / GPIO36 / GPIO38 | 入力専用系。出力に使わない |
 | GPIO0 / GPIO2 | boot strap系。原則としてmotion出力に使わない |
-| GPIO32 / GPIO33 | PORT-A。外部I2Cを使わない場合はGPIO/PWMとして使用可 |
+| GPIO32 / GPIO33 | PORT-A。STS3020 UART1 TX/RXとして専有。NeoPixelおよび外部I2Cと共用不可 |
 | GPIO14 / GPIO13 | PORT-C。TMC2209 UART用として使用 |
 | GPIO23 | Core2内蔵LCDのSPI MOSI。LCDを使う場合はmotion出力に使わない |
 | GPIO25 / GPIO26 / GPIO27 / GPIO19 | M-BUS経由でモータ制御に使用 |
@@ -93,8 +93,8 @@ Core2はESP32を搭載しており、2Core構成である。
 | TMC UART | `TMC_UART_RX_PIN` | 13 | ESP32 RX ← TMC2209 PDN_UART |
 | Xリミット | `X_LIMIT_PIN` | 36 | 入力専用。外付けpull-up推奨 |
 | Yリミット | `Y_LIMIT_PIN` | 35 | 入力専用。外付けpull-up推奨 |
-| ペン | `PEN_SERVO_PIN` | 32 | Servo PWM |
-| 予備 | `USER_IO_PIN` | 33 | 将来予備 |
+| ペンUART TX | `PEN_SERVO_UART_TX_PIN` | 32 | Serial1 1Mbps、半二重TTL変換アダプタ経由 |
+| ペンUART RX | `PEN_SERVO_UART_RX_PIN` | 33 | Serial1 RX、NeoPixel出力無効 |
 
 注意:
 
@@ -209,7 +209,9 @@ TMC2209Manager
 
 ```text
 PenController
-  -> Servo / Solenoid
+  -> Serial1 UART (GPIO32 TX / GPIO33 RX)
+  -> half-duplex TTL Bus Servo Adapter
+  -> FEETECH STS3020
 ```
 
 ```text
@@ -299,8 +301,9 @@ Diagnostics
 ### `PenController`
 
 - ペン上げ/下げ
-- サーボ角度制御
-- 将来M3/M5に接続する
+- STS3020 UART角度制御、疎通・現在位置読出し
+- 起動時は自動位置指令を行わない
+- PENUP/PENDOWN/M3/M5と、診断用PEN_STATUSに接続する
 
 ### `Diagnostics`
 
@@ -385,6 +388,7 @@ TEST_B <steps>
 XY <x_mm> <y_mm> <feed_mm_min>
 PENUP
 PENDOWN
+PEN_STATUS
 SELFTEST
 TMC_INIT
 TMC_STATUS

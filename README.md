@@ -27,23 +27,19 @@ Host WebUIがあります。
 
 - 初回起動はモータ電源を切った状態で行ってください。
 - GPIO35/36のリミット入力には外付けpull-upが必要です。
-- サーボ電源はCore2からではなく外部5V電源を推奨します。
+- STS3020には外部7.4V電源（1台あたり3A以上を目安）と、1Mbps半二重TTL UART変換基板（例: Waveshare Bus Servo Adapter (A)）が必要です。Core2の5V/3.3Vから給電しないでください。
 - TMC2209 UART TX側には1kΩ直列抵抗を入れてください。
-- GPIO33の外付けNEOPIXELは初期状態で消灯し、輝度上限を低く設定しています。
+- Port AのGPIO32=STS3020 UART TX、GPIO33=RX。既存のGPIO33 NeoPixelは競合するため**無効化**しています。物理的なNeoPixel配線も外してください。
+- 起動時はSTS3020への位置指令を送信しません。ホーンを外して`PEN_STATUS`で疎通確認してから`PENUP`/`PENDOWN`を試してください。
 - TMC2209 A/BのENはGND固定で常時activeです。電気的に停止するには外部スイッチ
   またはE-stop回路が必要です。
 
 ## Bring-up commands
 
 ```text
-LED 255 0 0
-LED_PIXEL 0 0 255 0
-LED_PATTERN PACIFICA
-LED_PATTERN FIRE
-LED_BRIGHTNESS 24
-LED_PARAM SPEED 160
-LED_STATUS
-LED_OFF
+PEN_STATUS
+PENUP
+PENDOWN
 TMC_INIT
 MELODY
 G28
@@ -65,6 +61,8 @@ readyの場合だけ明示実行します。終了または中断時には通常
 日本語文字列を描画する場合は、ホスト側CLIの`tools/text_tool/kst32b_to_gcode.py`で
 KST32BストロークフォントデータからG-codeを生成します。InkscapeやHershey Textには
 依存しません。詳細は[tools/text_tool/README.md](tools/text_tool/README.md)を参照してください。
+
+詳細: [STS3020接続・単体確認](tools/serial_tool/docs/sts3020-check.md)。サーボの初期ID=1、初期通信速度=1Mbps、0..360度と0..4095の角度換算を想定します。位置指令後に最大2秒間、実位置の誤差35カウント以内を確認します。ただしサーボ内部エンコーダの位置確認であり、ペン機構の接触・干渉がないことは保証しません。
 
 ## STS3020 servo ID setup
 

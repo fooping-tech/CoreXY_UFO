@@ -526,9 +526,13 @@ void motorTest(const HwCommand& command) {
            ok ? "OK" : "NG");
 }
 
-void servoAngle(int16_t angle_deg) {
-  pen_controller.setAngleDeg(angle_deg);
+bool servoAngle(int16_t angle_deg) {
+  if (!pen_controller.setAngleDeg(angle_deg)) {
+    logMessage("ERROR: STS3020 servo command failed (ID=%u)", PEN_SERVO_ID);
+    return false;
+  }
   status.servo_angle_deg = angle_deg;
+  return true;
 }
 
 void servoSweep() {
@@ -541,7 +545,10 @@ void servoSweep() {
        ++cycle) {
     for (int16_t a = low; a <= high && !hw_stop_requested;
          a += HWTEST_SERVO_SWEEP_STEP_DEG) {
-      servoAngle(a);
+      if (!servoAngle(a)) {
+        hw_stop_requested = true;
+        break;
+      }
       vTaskDelay(pdMS_TO_TICKS(HWTEST_SERVO_SWEEP_STEP_MS));
     }
     for (int16_t a = high; a >= low && !hw_stop_requested;
@@ -551,8 +558,13 @@ void servoSweep() {
     }
     publishStatus();
   }
+  const bool completed = !hw_stop_requested;
   hw_stop_requested = false;
-  pen_controller.penUp();
+  if (!completed || !pen_controller.penUp()) {
+    logMessage("ERROR: SERVO_SWEEP stopped or STS3020 unavailable");
+    setEvent("SERVO_SWEEP failed");
+    return;
+  }
   status.servo_angle_deg = PEN_UP_ANGLE_DEG;
   logMessage("SERVO_SWEEP DONE (confirm motion visually)");
   setEvent("SERVO_SWEEP done");
@@ -580,7 +592,7 @@ void selftest() {
 
   status.selftest = fails == 0 ? HwSelftestResult::PASS : HwSelftestResult::FAIL;
   status.selftest_fail_count = fails;
-  logMessage("SELFTEST manual checks: POWER, LED_TEST, PENUP/PENDOWN/SERVO_SWEEP, TMC_INIT + MOTOR A/B");
+  logMessage("SELFTEST manual checks: POWER, SERVO_STATUS, PENUP/PENDOWN/SERVO_SWEEP, TMC_INIT + MOTOR A/B");
   logMessage("SELFTEST RESULT %s fails=%u", fails == 0 ? "PASS" : "FAIL", fails);
   setEvent("SELFTEST %s (%u)", fails == 0 ? "PASS" : "FAIL", fails);
 }
@@ -630,22 +642,39 @@ void execute(const HwCommand& command) {
         logMessage("ERROR: SERVO angle must be 0..180");
         break;
       }
-      servoAngle(command.arg0);
-      logMessage("SERVO %ld deg DONE", static_cast<long>(command.arg0));
-      setEvent("SERVO %ld", static_cast<long>(command.arg0));
+      if (servoAngle(command.arg0)) {
+        logMessage("SERVO %ld deg DONE", static_cast<long>(command.arg0));
+        setEvent("SERVO %ld", static_cast<long>(command.arg0));
+      }
+
       break;
     case HwCommandType::PENUP:
-      pen_controller.penUp();
-      status.servo_angle_deg = PEN_UP_ANGLE_DEG;
-      logMessage("PENUP DONE angle=%u", PEN_UP_ANGLE_DEG);
-      setEvent("PENUP");
+      if (pen_controller.penUp()) {
+        status.servo_angle_deg = PEN_UP_ANGLE_DEG;
+        logMessage("PENUP DONE angle=%u", PEN_UP_ANGLE_DEG);
+        setEvent("PENUP");
+      } else {
+        logMessage("ERROR: PENUP STS3020 no response");
+      }
       break;
     case HwCommandType::PENDOWN:
-      pen_controller.penDown();
-      status.servo_angle_deg = PEN_DOWN_ANGLE_DEG;
-      logMessage("PENDOWN DONE angle=%u", PEN_DOWN_ANGLE_DEG);
-      setEvent("PENDOWN");
+      if (pen_controller.penDown()) {
+        status.servo_angle_deg = PEN_DOWN_ANGLE_DEG;
+        logMessage("PENDOWN DONE angle=%u", PEN_DOWN_ANGLE_DEG);
+        setEvent("PENDOWN");
+      } else {
+        logMessage("ERROR: PENDOWN STS3020 no response");
+      }
       break;
+    case HwCommandType::SERVO_STATUS: {
+      int position = -1;
+      if (pen_controller.ping() && pen_controller.readPosition(position)) {
+        logMessage("SERVO_STATUS OK id=%u position=%d", PEN_SERVO_ID, position);
+      } else {
+        logMessage("ERROR: SERVO_STATUS STS3020 no response");
+      }
+      break;
+    }
     case HwCommandType::SERVO_SWEEP:
       servoSweep();
       break;
@@ -657,8 +686,11 @@ void hwTestTask(void*) {
   pinMode(X_LIMIT_PIN, INPUT);
   pinMode(Y_LIMIT_PIN, INPUT);
   probe.begin();
-  pen_controller.begin();
-  status.servo_angle_deg = PEN_UP_ANGLE_DEG;
+  const bool pen_ready = pen_controller.begin();
+  status.servo_angle_deg = -1;  // Unknown actual position until commanded.
+  logMessage("STS3020 UART1 TX=%u RX=%u ID=%u ping=%s (no startup motion)",
+             PEN_SERVO_UART_TX_PIN, PEN_SERVO_UART_RX_PIN, PEN_SERVO_ID,
+             pen_ready ? "OK" : "NO_REPLY");
   publishStatus();
 
   HwCommand command;

@@ -71,6 +71,10 @@ void applyLedTestStep() {
 }
 
 void tickLed() {
+  if (!NEOPIXEL_ENABLED) {
+    led_request.request = HwLedRequest::NONE;
+    return;
+  }
   const HwLedRequest request = led_request.request;
   if (request != HwLedRequest::NONE) {
     led_request.request = HwLedRequest::NONE;
@@ -214,7 +218,7 @@ void draw(const HwStatus& s) {
   gfx->setTextColor(COLOR_MUTED, COLOR_BG);
   gfx->drawString("SELFTEST", 22, 226);
   gfx->drawString("PEN UP/DN", 128, 226);
-  gfx->drawString("LED TEST", 238, 226);
+  gfx->drawString("LED OFF", 238, 226);
 
   if (gfx != &M5.Display) canvas.pushSprite(0, 0);
 }
@@ -232,7 +236,10 @@ void handleButtons(const HwStatus& s) {
                        : HwCommandType::PENDOWN;
     if (!enqueueHwCommand(command)) logMessage("ERROR: command queue full");
   }
-  if (M5.BtnC.wasClicked()) requestHwLed(HwLedRequest::TEST);
+  if (M5.BtnC.wasClicked()) {
+    if (NEOPIXEL_ENABLED) requestHwLed(HwLedRequest::TEST);
+    else logMessage("ERROR: NeoPixel disabled; GPIO33 is STS3020 RX");
+  }
 }
 }  // namespace
 
@@ -257,9 +264,13 @@ void hwUiTask(void*) {
     canvas.setTextFont(1);
     gfx = &canvas;
   }
-  neopixel_controller.begin();
-  neopixel_controller.setBrightness(HWTEST_LED_BRIGHTNESS);
-  neopixel_controller.off();
+  if (NEOPIXEL_ENABLED) {
+    neopixel_controller.begin();
+    neopixel_controller.setBrightness(HWTEST_LED_BRIGHTNESS);
+    neopixel_controller.off();
+  } else {
+    strcpy(led_state_text, "disabled");
+  }
 
   HwStatus status;
   uint32_t last_draw_ms = 0;

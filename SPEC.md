@@ -1233,6 +1233,20 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - `G0/G1/G4/G20/G21/G28/G90/G91/M3/M5/M114`の最小G-codeをSerialから受け、既存の安全なmotion/pen/status/homing経路へ接続できる
 
 
+## 2026-10-12: STS3020 UARTペン制御への変更
+
+- ペンは従来の50Hz PWMサーボからFEETECH STS3020シリアルバスサーボへ変更。
+- M5Stack Core2 Port A: GPIO32 = UART1 TX、GPIO33 = UART1 RX、1Mbps、8N1。Waveshare Bus Servo Adapter (A) 等の半二重TTL変換基板と外部7.4V電源を必須とする。
+- サーボはID 1、位置制御モードを前提とする。0..360度を0..4095の単位へ換算。PEN_UP=60度、PEN_DOWN=80度、速度300、加速度20は初期設定値であり実機調整が必要。
+- Serial2（GPIO14/13）のTMC2209バスは変更しない。
+- GPIO33のNeoPixel/LEDパターン出力は使用不可。LED系SerialコマンドはERRORとして拒否。外付けLEDの配線も外す。
+- UARTの所有者はCore1のPenController。起動時は接続Pingのみで位置指令しない。SIMULATION_MODEではUARTを駆動しない。
+- PEN_STATUSコマンドはPingと現在位置読出しのみで無動作。PENUP/PENDOWNおよびG-code M5/M3は従来の論理インターフェースを維持する。
+- ペン指令はPing確認後に送る。応答なしの場合はERRORをログ出力しpen_down状態を変更しない。ジョブ開始時のpenUp失敗はJOB_BEGINを拒否、JOB_ENDでpenUp失敗した場合はparkしない。
+- 位置指令後はSTS3020内部エンコーダの位置を20ms間隔で読み、2秒以内に目標から35カウント以内へ到達した場合だけ成功扱い。タイムアウト/読み取り失敗はペン指令失敗とする。サーボ位置到達は外部ペン機構の干渉・破損がないことの保証ではない。
+- `m5stack-core2-hwtest` はSERVO_STATUS、SERVO、PENUP、PENDOWN、SERVO_SWEEPをSTS3020に対応させた。LED_TESTは無効。
+- 詳細は `tools/serial_tool/docs/sts3020-check.md` を参照する。
+
 ## 2026-10-17: STS3020単体テストファームウェア
 
 - 専用PlatformIO環境`m5stack-core2-sts3020-test`を追加。ソースは`src/sts3020test/`のみで、CoreXY/TMC2209/NeoPixel/FreeRTOS UIタスクはリンクしない。通常の`m5stack-core2`環境は`-<sts3020test/>`で除外し、FTServoライブラリへの依存も持たない。

@@ -806,9 +806,13 @@ void uiTask(void*) {
   } else {
     logMessage("ERROR: M5 UI disabled by pin configuration");
   }
-  neopixel_controller.begin();
-  led_pattern_engine.begin(neopixel_controller);
-  led_pattern_engine.setStatus(LedStatus::IDLE);
+  if (NEOPIXEL_ENABLED) {
+    neopixel_controller.begin();
+    led_pattern_engine.begin(neopixel_controller);
+    led_pattern_engine.setStatus(LedStatus::IDLE);
+  } else {
+    logMessage("NeoPixel disabled: GPIO33 is STS3020 UART RX");
+  }
 
   StatusMessage status;
   StatusMessage displayed_status;
@@ -818,9 +822,9 @@ void uiTask(void*) {
     if (M5_UI_ENABLED) M5.update();
     LedCommand led_command;
     while (xQueueReceive(led_command_queue, &led_command, 0) == pdTRUE) {
-      led_pattern_engine.applyCommand(led_command);
+      if (NEOPIXEL_ENABLED) led_pattern_engine.applyCommand(led_command);
     }
-    led_pattern_engine.tick(millis());
+    if (NEOPIXEL_ENABLED) led_pattern_engine.tick(millis());
 
     if (xQueueReceive(status_queue, &status, pdMS_TO_TICKS(20)) == pdTRUE) {
       have_status = true;

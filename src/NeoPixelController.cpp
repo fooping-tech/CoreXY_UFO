@@ -7,6 +7,7 @@ CRGB fastled_pixels[NEOPIXEL_LED_COUNT];
 }
 
 void NeoPixelController::begin() {
+  if (!NEOPIXEL_ENABLED) return;
   FastLED.addLeds<WS2812B, NEOPIXEL_PIN, GRB>(fastled_pixels,
                                               NEOPIXEL_LED_COUNT);
   FastLED.setBrightness(brightness_);
@@ -32,6 +33,7 @@ void NeoPixelController::setBrightness(uint8_t brightness) {
 }
 
 void NeoPixelController::show() {
+  if (!NEOPIXEL_ENABLED) return;
   for (uint16_t i = 0; i < NEOPIXEL_LED_COUNT; ++i) {
     fastled_pixels[i] = CRGB(pixels_[i].r, pixels_[i].g, pixels_[i].b);
   }

@@ -57,7 +57,7 @@ void setup() {
   led_command_queue = xQueueCreate(LED_COMMAND_QUEUE_LENGTH, sizeof(LedCommand));
 
   safety_manager.begin();
-  pen_controller.begin();
+  // UART1 pen initialization is owned by motionTask on Core 1.
   if (!stepper_backend.begin()) {
     logMessage("ERROR: FastAccelStepper backend initialization failed");
   }

@@ -1,6 +1,7 @@
 # Servo On/Off Check
 
-ペン上げ/下げサーボの配線、角度、電源を確認するチェックです。
+FEETECH STS3020のペン上げ/下げUART指令、現在位置、電源を確認するチェックです。
+Waveshareなどの半二重TTL UART変換基板を使用してください。詳細な配線は[STS3020 Check](sts3020-check.md)。
 ファームウェアコマンド名は`PENUP`と`PENDOWN`です。
 
 ## CSV
@@ -22,7 +23,8 @@ python tools/serial_tool/serial_send.py \
 
 | Step | What to confirm |
 |---|---|
-| `CONFIG` | `PEN=32`が実配線と一致する |
+| `CONFIG` | `STS3020 UART TX=32 RX=33`と表示される |
+| `PEN_STATUS` | 通電してから位置が読める（サーボは動かない） |
 | `POS` | 起動時は`PEN=UP` |
 | `PENDOWN` | サーボがペン下げ方向へ動く |
 | `PENUP` | サーボがペン上げ方向へ動く |
@@ -30,7 +32,9 @@ python tools/serial_tool/serial_send.py \
 
 ## Related Config
 
-- `PEN_SERVO_PIN`
+- `PEN_SERVO_UART_TX_PIN` / `PEN_SERVO_UART_RX_PIN`
+- `PEN_SERVO_ID` / `PEN_SERVO_UART_BAUD`
+- `PEN_SERVO_SPEED` / `PEN_SERVO_ACCELERATION`
 - `PEN_UP_ANGLE_DEG`
 - `PEN_DOWN_ANGLE_DEG`
 
@@ -50,4 +54,4 @@ pio run
 pio run --target upload
 ```
 
-サーボ電源はCore2本体からではなく、外部5V電源を推奨します。
+STS3020は外部7.4V電源（目安3A以上）を使用し、Core2からサーボには給電しません。初回はホーンを外してください。
