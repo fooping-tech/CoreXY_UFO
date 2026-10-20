@@ -110,11 +110,31 @@ void testSegmentGeneratorSumsToBlockSteps() {
   }
 }
 
+// TEST_JOG/TEST_A/TEST_B limit direction checks rely on the inverse.
+void testABStepsToXYDeltaInvertsForwardDelta() {
+  const float cases_mm[][2] = {{10.0f, 0.0f}, {0.0f, 10.0f}, {-5.0f, 2.5f},
+                               {3.0f, -7.0f}, {0.0f, 0.0f}};
+  for (const auto& xy : cases_mm) {
+    const CoreXYDelta forward =
+        CoreXYKinematics::xyDeltaToABSteps(xy[0], xy[1], STEPS_PER_MM);
+    const CoreXYDelta inverse = CoreXYKinematics::abStepsToXYDelta(
+        forward.a_steps, forward.b_steps, STEPS_PER_MM);
+    require(std::fabs(inverse.dx_mm - xy[0]) < 0.02f, "inverse dx mismatch");
+    require(std::fabs(inverse.dy_mm - xy[1]) < 0.02f, "inverse dy mismatch");
+  }
+  // Single motor: A+ is +X +Y, B+ is +X -Y.
+  const CoreXYDelta a_only = CoreXYKinematics::abStepsToXYDelta(400, 0, STEPS_PER_MM);
+  require(a_only.dx_mm > 0.0f && a_only.dy_mm > 0.0f, "A+ must be +X +Y");
+  const CoreXYDelta b_only = CoreXYKinematics::abStepsToXYDelta(0, 400, STEPS_PER_MM);
+  require(b_only.dx_mm > 0.0f && b_only.dy_mm < 0.0f, "B+ must be +X -Y");
+}
+
 }  // namespace
 
 int main() {
   testAbsoluteStepClosedLoop();
   testSegmentGeneratorSumsToBlockSteps();
+  testABStepsToXYDeltaInvertsForwardDelta();
   std::cout << "native motion drift tests passed\n";
   return 0;
 }

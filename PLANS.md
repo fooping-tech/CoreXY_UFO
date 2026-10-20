@@ -2504,3 +2504,44 @@ Z軸構想: 紐とドラム、ストローク800mm、荷重400g。STS3020(7.4V�
 - 内部多回転位置がPresent Positionで読めないため、ESP32リセット時や追跡喪失時に絶対位置を復元できない。Z軸実装では起動時の上端リミットによる原点出しが必須。ステップモード(mode 3)の比較評価も検討する。
 - 多回転で意図しない回転が実測されたため、荷重付きZ軸での使用は上記確認が完了するまで禁止。
 - 電源断時に400gのアームが落下するか(ギア摩擦で保持できるか)は未確認。
+
+## 2026-10-21: WebUI テストモード
+
+- [x] PR #1をmainへマージ(ドキュメント競合を解消、main/sts3020-testビルド、実機SELFTEST PASS)
+- [x] StsServoBus追加、PenControllerをStsServoBus経由へ、PEN_SERVO_ENABLED=false
+- [x] TEST_MODE / TEST_JOG / SERVO_STATUS / SERVO_ANGLE / SERVO_TURN / SERVO_OFF、TEST_A/TEST_Bへfeed引数
+- [x] TEST_JOG/TEST_A/TEST_Bのリミット停止・リミット方向拒否
+- [x] WebUI Testタブ、/api/test/*、serial_send排他、POS定期取得、サーバー単体テスト(test_test_mode.py)
+- [x] CoreXYKinematics::abStepsToXYDeltaとnativeテスト
+- [x] FastLED 3.10.6固定で m5stack-core2 / sim / hwtest / sts3020-test 全ビルドSUCCESS
+- [x] sim版実機(Core2)でWebUI API経由の一連確認: テストモードOFF時の拒否、TEST_JOG DONE、50mm超拒否、TEST_A/B DONE、SERVO_TURN 3 / SERVO_ANGLE PASS(sim)、STOP→ALARM→ALARM_CLEAR、TEST_MODE OFF
+- [x] 通常版実機: 起動ログ(ID1/ID2 ping)、SELFTEST PASS、PENUP ERROR、TEST_MODE ON/OFF、POS定期取得(LIMIT/RAW/TEST_MODE)、サーボ無応答時のSERVO_STATUS NO_REPLY / SERVO_TURN・SERVO_ANGLE REJECTED
+- [x] Testタブの表示をヘッドレスChromeで確認
+- [ ] サーボ電源投入後: SERVO_STATUS、SERVO_TURN ±1/4・±3、SERVO_ANGLE、STOP中断(hold停止)を実機確認
+- [ ] ステッピングモータ接続状態でTEST_JOG ±X/±Y、TEST_A/B、STOPPED_LIMIT、リミット方向REJECTEDを実機確認
+- [ ] ブラウザ実操作(タッチ/クリック)での確認
+
+未解決リスク:
+
+- TEST_JOGは`moveABSteps`(A/B独立move)で、厳密なXY直線補間ではない。純X/純Yは同ステップ数なので概ね直線。
+- リミット停止は`forceStop()`で減速なし。停止距離は未測定。
+- WebUIの定期取得はPOSごとにserial_sendを起動しポートを開閉する。ポート開閉でCore2がリセットされないことは今回の実機で確認したが、長時間連続運用は未確認。
+- SSEのログキューは単一で、複数タブで開くとイベントが分散する(既存問題)。
+- Controlタブの`PEN UP/DOWN`ボタンはファームウェアでERRORになる(ペン未割当)。
+
+## 2026-10-21: TMC2209 起動時初期化・リセット検出、HOME後の退避移動廃止
+
+- [x] 起動時TMC_INIT、移動直前チェック(GSTAT.reset検出時のみ再送)
+- [x] 待機中500msの周期チェックは不要との判断で削除
+- [x] TEST_A/TEST_BにensureTmcReadyForMotionを追加
+- [x] HOMING_PARK_AFTER_HOME_ENABLED=falseでHOME後のY+退避移動を廃止
+- [x] main/sim/hwtestビルドSUCCESS
+- [x] 実機: 起動ログ`TMC_INIT ... A connection=0 B connection=0 ready=YES`、TMC_STATUSでA/Bとも1/16・1104mA、(削除前の)待機中チェックでIFCNT不変(23→23、約8秒)
+- [ ] VMを切って入れ直し、`TMC reset detected ... re-applied`とHOMED解除、TMC_STATUSで1/16に戻ることを確認
+- [ ] 実機HOMEで原点(0,0)終了・Y+退避なし、終了後にlimit ON状態でalarmにならないことを確認
+- [ ] TEST_A/TEST_Bを再起動直後に実行し、1/16設定で期待距離を動くことを確認
+
+未解決リスク:
+
+- 周期チェックがないため、VMを切っても次の移動コマンドまで検出されない(`POS`のTMC=READYは移動前まで古い値のまま)。長時間ジョブ中はG-code間の移動直前(ステッパ停止時)のみチェックされる。
+- HOME終了位置はリミットON付近(原点)。次の移動はリミット解放方向のみ許可される既存仕様のまま。

@@ -18,6 +18,12 @@ enum class TMC2209Axis : uint8_t {
 
 // Raw register snapshot for hardware diagnostics. Decoding is left to the
 // caller so this manager stays a thin UART owner.
+enum class TMC2209Health : uint8_t {
+  OK,          // both drivers answer, no reset since the last configuration
+  REAPPLIED,   // a driver reset (e.g. VM power cycle) was found; config re-sent
+  NO_REPLY,    // a driver does not answer (VM off or UART fault)
+};
+
 struct TMC2209Diagnostics {
   uint8_t address = 0;
   uint8_t connection = 0xFF;  // test_connection(): 0=OK, 1=no reply, 2=zero
@@ -44,6 +50,9 @@ class TMC2209Manager {
   bool readDiagnostics(TMC2209Axis axis, TMC2209Diagnostics& diagnostics);
   void printStatus() const;
   bool isReady() const;
+  // Pre-motion check (never during motion):
+  // reads IOIN and GSTAT; on GSTAT.reset re-applies the current profile.
+  TMC2209Health checkAndRecover();
 
  private:
   bool applyProfile(const TMC2209Profile& profile, const char* label);

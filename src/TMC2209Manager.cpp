@@ -204,3 +204,32 @@ void TMC2209Manager::printStatus() const {
 }
 
 bool TMC2209Manager::isReady() const { return ready_; }
+
+TMC2209Health TMC2209Manager::checkAndRecover() {
+  if (!initialized_) return TMC2209Health::NO_REPLY;
+#if SIMULATION_MODE
+  return ready_ ? TMC2209Health::OK : TMC2209Health::NO_REPLY;
+#else
+  if (!refreshConnectionStatus()) {
+    ready_ = false;
+    return TMC2209Health::NO_REPLY;
+  }
+  // GSTAT.reset (bit 0) is set after a driver power-up. configureDrivers()
+  // clears it, so a set bit means the registers fell back to defaults.
+  constexpr uint8_t GSTAT_RESET = 0x01;
+  const bool reset_a = (driver_a_->GSTAT() & GSTAT_RESET) != 0;
+  const bool reset_b = (driver_b_->GSTAT() & GSTAT_RESET) != 0;
+  if (!reset_a && !reset_b) {
+    ready_ = true;
+    return TMC2209Health::OK;
+  }
+  if (reset_a) applyDriverConfig(*driver_a_, current_profile_);
+  if (reset_b) applyDriverConfig(*driver_b_, current_profile_);
+  ready_ = refreshConnectionStatus();
+  logMessage("TMC reset detected A=%s B=%s; profile re-applied microsteps=1/%u current=%umA ready=%s",
+             reset_a ? "YES" : "NO", reset_b ? "YES" : "NO",
+             current_profile_.microsteps, current_profile_.rms_current_ma,
+             ready_ ? "YES" : "NO");
+  return ready_ ? TMC2209Health::REAPPLIED : TMC2209Health::NO_REPLY;
+#endif
+}

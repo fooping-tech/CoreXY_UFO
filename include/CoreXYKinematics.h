@@ -20,6 +20,9 @@ class CoreXYKinematics {
                                                  float steps_per_mm);
   static CoreXYDelta xyDeltaToABSteps(float dx_mm, float dy_mm,
                                       float steps_per_mm);
+  // Inverse: A/B step delta -> XY delta [mm].
+  static CoreXYDelta abStepsToXYDelta(int32_t a_steps, int32_t b_steps,
+                                      float steps_per_mm);
   static CoreXYDelta xyMoveToABSteps(float current_x_mm, float current_y_mm,
                                      float target_x_mm, float target_y_mm,
                                      float steps_per_mm);

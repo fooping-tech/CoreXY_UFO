@@ -1,4 +1,6 @@
 #include <Arduino.h>
+#include <math.h>
+#include <stdio.h>
 #include <string.h>
 #include "AppContext.h"
 #include "Core2PinMap.h"
@@ -355,7 +357,36 @@ bool rejectDisallowedJobCommand(const CommandMessage& command) {
   return true;
 }
 
+uint32_t last_tmc_check_ms = 0;
+TMC2209Health last_tmc_health = TMC2209Health::NO_REPLY;
+
+// Applies a health check result. A driver reset or lost driver means the
+// motors may have lost holding torque, so homing can no longer be trusted.
+void checkTmcHealth(const char* context) {
+  last_tmc_check_ms = millis();
+  const bool was_ready = machine_state.tmc_ready;
+  const TMC2209Health health = tmc_manager.checkAndRecover();
+  machine_state.tmc_ready = health != TMC2209Health::NO_REPLY;
+  if (health == TMC2209Health::REAPPLIED) {
+    if (was_ready) invalidateHomed("TMC driver reset");
+    logMessage("%s TMC config re-applied after driver reset", context);
+  } else if (health == TMC2209Health::NO_REPLY &&
+             last_tmc_health != TMC2209Health::NO_REPLY) {
+    if (was_ready) invalidateHomed("TMC driver not responding");
+    logMessage("WARN: %s TMC driver not responding (VM off?)", context);
+  } else if (health == TMC2209Health::OK && last_tmc_health == TMC2209Health::NO_REPLY) {
+    logMessage("%s TMC driver responding", context);
+  }
+  last_tmc_health = health;
+  publishStatus();
+}
+
 bool ensureTmcReadyForMotion(const char* context) {
+  if (machine_state.tmc_ready && tmc_manager.isReady() &&
+      !stepper_backend.isRunning() &&
+      millis() - last_tmc_check_ms >= TMC_HEALTH_CHECK_INTERVAL_MS) {
+    checkTmcHealth(context);
+  }
   if (machine_state.tmc_ready && tmc_manager.isReady()) {
     return true;
   }
@@ -850,45 +881,210 @@ void recordMotorTestResult(bool motor_a, int32_t steps, const char* result) {
   publishStatus();
 }
 
-// feed_mm_min > 0: 指定feed相当の速度で単独モータを動かす(UIテストモード用)。
-// feed_mm_min <= 0: 従来通りbackendの現在速度設定で動かす(Serial TEST_A/TEST_B)。
-void handleSingleMotor(bool motor_a, int32_t steps, float feed_mm_min) {
-  invalidateHomed("independent motor test");
+// Un-homed test motion (TEST_A/TEST_B/TEST_JOG). Homing does not protect
+// these moves, so a limit switch that is open at the start stops the move as
+// soon as it turns ON (raw or debounced), and moves pushing into an already
+// active switch are refused. feed_mm_min > 0 runs both motors at that feed;
+// otherwise a single motor runs at the backend default speed (legacy Serial
+// TEST_A/TEST_B). Returns the result token for the "<cmd> result=" log.
+const char* runTestMotion(int32_t a_steps, int32_t b_steps, float feed_mm_min,
+                          char* detail, size_t detail_size) {
+  detail[0] = '\0';
+  if (a_steps == 0 && b_steps == 0) {
+    snprintf(detail, detail_size, "reason=no_steps");
+    return "REJECTED";
+  }
+  safety_manager.poll();
+  machine_state.alarmed = safety_manager.isAlarmed();
+  if (machine_state.alarmed) {
+    snprintf(detail, detail_size, "reason=alarm (ALARM_CLEAR)");
+    return "REJECTED";
+  }
+  const bool x_active_at_start =
+      safety_manager.xLimitActive() || safety_manager.xLimitRawActive();
+  const bool y_active_at_start =
+      safety_manager.yLimitActive() || safety_manager.yLimitRawActive();
+  const CoreXYDelta delta =
+      CoreXYKinematics::abStepsToXYDelta(a_steps, b_steps, STEPS_PER_MM);
+  if (x_active_at_start && delta.dx_mm * static_cast<float>(HOMING_X_DIR) > 0.0f) {
+    snprintf(detail, detail_size, "reason=x_limit_active_toward_limit");
+    return "REJECTED";
+  }
+  if (y_active_at_start && delta.dy_mm * static_cast<float>(HOMING_Y_DIR) > 0.0f) {
+    snprintf(detail, detail_size, "reason=y_limit_active_toward_limit");
+    return "REJECTED";
+  }
+  invalidateHomed("test motion without homing");
 #if SIMULATION_MODE
-  logMessage("SIMULATION_MODE: TEST_%c steps=%ld no motor output",
-             motor_a ? 'A' : 'B', steps);
-  recordMotorTestResult(motor_a, steps, "SIM");
+  machine_state.x_mm += delta.dx_mm;
+  machine_state.y_mm += delta.dy_mm;
+  machine_state.a_steps += a_steps;
+  machine_state.b_steps += b_steps;
+  snprintf(detail, detail_size, "sim=YES");
+  return "DONE";
 #else
+  const MotionSyncReference reference = captureMotionSyncReference();
   bool accepted = false;
   if (feed_mm_min > 0.0f) {
-    accepted = stepper_backend.moveABSteps(motor_a ? steps : 0,
-                                           motor_a ? 0 : steps, feed_mm_min);
-  } else {
-    accepted = motor_a ? stepper_backend.moveASteps(steps)
-                       : stepper_backend.moveBSteps(steps);
+    accepted = stepper_backend.moveABSteps(a_steps, b_steps, feed_mm_min);
+  } else if (b_steps == 0) {
+    accepted = stepper_backend.moveASteps(a_steps);
+  } else if (a_steps == 0) {
+    accepted = stepper_backend.moveBSteps(b_steps);
   }
   if (!accepted) {
-    logMessage("ERROR: backend rejected TEST_%c", motor_a ? 'A' : 'B');
-    recordMotorTestResult(motor_a, steps, "REJECT");
-    return;
+    snprintf(detail, detail_size, "reason=backend_rejected");
+    return "REJECTED";
   }
   setMotionActive(true);
-  const bool completed = waitForMotionOrLimit();
-  if (!completed) {
-    logMessage("ERROR: TEST_%c stopped", motor_a ? 'A' : 'B');
+  const char* result = "DONE";
+  while (stepper_backend.isRunning()) {
+    if (stopForAbort("Test motion stopped")) {
+      snprintf(detail, detail_size, "reason=abort");
+      result = "STOPPED";
+      break;
+    }
+    updateMachinePositionEstimateFromBackend(reference);
+    safety_manager.poll();
+    const bool x_hit = !x_active_at_start && (safety_manager.xLimitActive() ||
+                                              safety_manager.xLimitRawActive());
+    const bool y_hit = !y_active_at_start && (safety_manager.yLimitActive() ||
+                                              safety_manager.yLimitRawActive());
+    if (x_hit || y_hit) {
+      stepper_backend.stop();
+      snprintf(detail, detail_size, "limit=%s%s", x_hit ? "X" : "", y_hit ? "Y" : "");
+      result = "STOPPED_LIMIT";
+      break;
+    }
+    if (safety_manager.isAlarmed()) {
+      stepper_backend.stop();
+      snprintf(detail, detail_size, "reason=alarm");
+      result = "STOPPED";
+      break;
+    }
+    vTaskDelay(pdMS_TO_TICKS(1));
   }
+  updateMachinePositionEstimateFromBackend(reference);
   setMotionActive(false);
-  recordMotorTestResult(motor_a, steps, completed ? "DONE" : "STOPPED");
+  return result;
 #endif
+}
+
+// feed_mm_min > 0: 指定feed相当の速度で単独モータを動かす(UI/WebUIテストモード用)。
+// feed_mm_min <= 0: 従来通りbackendの現在速度設定で動かす(Serial TEST_A/TEST_B)。
+void handleSingleMotor(bool motor_a, int32_t steps, float feed_mm_min) {
+  char detail[64];
+  const char* result = runTestMotion(motor_a ? steps : 0, motor_a ? 0 : steps,
+                                     feed_mm_min, detail, sizeof(detail));
+  recordMotorTestResult(motor_a, steps, result);
+  logMessage("TEST_%c result=%s steps=%+ld %s", motor_a ? 'A' : 'B', result,
+             static_cast<long>(steps), detail);
+}
+
+void handleTestMode(const CommandMessage& command) {
+  if (!command.enable) {
+    machine_state.test_mode_active = false;
+    logMessage("TEST_MODE result=OFF homed=%s%s", machine_state.homed ? "YES" : "NO",
+               machine_state.homed ? "" : " (HOME before jobs)");
+    return;
+  }
+  if (job_controller.isActive() || job_controller.isRunning()) {
+    logMessage("TEST_MODE result=REJECTED reason=job_active");
+    return;
+  }
+  if (machine_state.homing_active || stepper_backend.isRunning()) {
+    logMessage("TEST_MODE result=REJECTED reason=busy");
+    return;
+  }
+  machine_state.test_mode_active = true;
+  logMessage("TEST_MODE result=ON (moves clear HOMED; limits stop TEST_JOG/TEST_A/TEST_B)");
+}
+
+void handleTestJog(const CommandMessage& command) {
+  const char* result = "REJECTED";
+  char detail[64] = "";
+  if (!machine_state.test_mode_active) {
+    snprintf(detail, sizeof(detail), "reason=test_mode_off");
+  } else if (fabsf(command.x_mm) > TEST_JOG_MAX_DISTANCE_MM ||
+             fabsf(command.y_mm) > TEST_JOG_MAX_DISTANCE_MM) {
+    snprintf(detail, sizeof(detail), "reason=distance_over max=%.1fmm",
+             TEST_JOG_MAX_DISTANCE_MM);
+  } else if (!(command.feed_mm_min > 0.0f) ||
+             command.feed_mm_min > TEST_JOG_MAX_FEED_MM_MIN) {
+    snprintf(detail, sizeof(detail), "reason=feed_out_of_range max=%.0f",
+             TEST_JOG_MAX_FEED_MM_MIN);
+  } else if (ensureTmcReadyForMotion("TEST_JOG")) {
+    const CoreXYDelta delta =
+        CoreXYKinematics::xyDeltaToABSteps(command.x_mm, command.y_mm, STEPS_PER_MM);
+    result = runTestMotion(delta.a_steps, delta.b_steps, command.feed_mm_min, detail,
+                           sizeof(detail));
+  } else {
+    snprintf(detail, sizeof(detail), "reason=tmc_not_ready");
+  }
+  logMessage("TEST_JOG result=%s dx=%.3f dy=%.3f F=%.0f X=%.3f Y=%.3f %s", result,
+             command.x_mm, command.y_mm, command.feed_mm_min, machine_state.x_mm,
+             machine_state.y_mm, detail);
+}
+
+void handleServoStatus(uint8_t id) {
+  StsServoStatus status;
+  if (!sts_servo_bus.readStatus(id, status)) {
+    logMessage("SERVO_STATUS id=%u result=NO_REPLY tracking=%s", id,
+               status.tracking ? "YES" : "NO");
+    return;
+  }
+  logMessage("SERVO_STATUS id=%u result=OK flags=0x%02X mode=%d torque=%d raw=%d "
+             "goal=%d limits=%d/%d tracking=%s abs=%ld turns=%.2f voltage=%.1f "
+             "temp=%d moving=%d",
+             id, status.error_flags, status.mode, status.torque, status.raw_counts,
+             status.goal_counts, status.min_limit_counts, status.max_limit_counts,
+             status.tracking ? "YES" : "NO", static_cast<long>(status.abs_counts),
+             static_cast<float>(status.abs_counts) / STS_COUNTS_PER_TURN,
+             status.voltage_dv * 0.1f, status.temperature_c, status.moving);
+}
+
+void handleServoMove(const CommandMessage& command) {
+  const bool angle = command.type == CommandType::SERVO_ANGLE;
+  const char* name = angle ? "SERVO_ANGLE" : "SERVO_TURN";
+  char detail[112] = "";
+  StsMoveResult result = StsMoveResult::REJECTED;
+  if (!machine_state.test_mode_active) {
+    snprintf(detail, sizeof(detail), "reason=test_mode_off");
+  } else if (angle) {
+    setMotionActive(true);
+    result = sts_servo_bus.moveToAngle(command.servo_id, command.servo_value,
+                                       isMotionAbortRequested, detail, sizeof(detail));
+    setMotionActive(false);
+  } else if (fabsf(command.servo_value) > STS_TEST_MAX_TURNS) {
+    snprintf(detail, sizeof(detail), "reason=turns_over max=%.1f", STS_TEST_MAX_TURNS);
+  } else {
+    const int32_t delta_counts =
+        static_cast<int32_t>(lroundf(command.servo_value * STS_COUNTS_PER_TURN));
+    setMotionActive(true);
+    result = sts_servo_bus.moveRelative(command.servo_id, delta_counts,
+                                        isMotionAbortRequested, detail, sizeof(detail));
+    setMotionActive(false);
+  }
+  logMessage("%s id=%u value=%.2f result=%s %s", name, command.servo_id,
+             command.servo_value, stsMoveResultName(result), detail);
 }
 }
 
 void motionTask(void*) {
-  const bool pen_ready = pen_controller.begin();
-  logMessage("STS3020 UART1 TX=%u RX=%u baud=%lu ID=%u ping=%s (no startup motion)",
-             PEN_SERVO_UART_TX_PIN, PEN_SERVO_UART_RX_PIN,
-             static_cast<unsigned long>(PEN_SERVO_UART_BAUD), PEN_SERVO_ID,
-             pen_ready ? "OK" : "NO_REPLY");
+  pen_controller.begin();
+  for (uint8_t id = STS_SERVO_ID_MIN; id <= STS_SERVO_ID_MAX; ++id) {
+    logMessage("STS3020 UART1 TX=%u RX=%u baud=%lu ID=%u ping=%s (no startup motion)",
+               PEN_SERVO_UART_TX_PIN, PEN_SERVO_UART_RX_PIN,
+               static_cast<unsigned long>(PEN_SERVO_UART_BAUD), id,
+               sts_servo_bus.ping(id) ? "OK" : "NO_REPLY");
+  }
+  logMessage("PEN servo %s", PEN_SERVO_ENABLED ? "enabled" : "disabled (no servo assigned)");
+  // Send the TMC2209 configuration once at boot. If VM is off this fails and
+  // the pre-motion check applies it when the drivers come up (GSTAT.reset).
+  machine_state.tmc_ready = tmc_manager.begin();
+  last_tmc_health = machine_state.tmc_ready ? TMC2209Health::OK : TMC2209Health::NO_REPLY;
+  last_tmc_check_ms = millis();
+  publishStatus();
   CommandMessage command;
   for (;;) {
     if (!receiveNextCommand(command, portMAX_DELAY)) continue;
@@ -918,10 +1114,33 @@ void motionTask(void*) {
         logMessage("ZERO logical origin reset; this is not homing");
         break;
       case CommandType::TEST_A:
-        handleSingleMotor(true, command.steps, command.feed_mm_min);
+      case CommandType::TEST_B: {
+        const bool motor_a = command.type == CommandType::TEST_A;
+        if (ensureTmcReadyForMotion(motor_a ? "TEST_A" : "TEST_B")) {
+          handleSingleMotor(motor_a, command.steps, command.feed_mm_min);
+        } else {
+          recordMotorTestResult(motor_a, command.steps, "REJECT");
+          logMessage("TEST_%c result=REJECTED steps=%+ld reason=tmc_not_ready",
+                     motor_a ? 'A' : 'B', static_cast<long>(command.steps));
+        }
         break;
-      case CommandType::TEST_B:
-        handleSingleMotor(false, command.steps, command.feed_mm_min);
+      }
+      case CommandType::TEST_MODE:
+        handleTestMode(command);
+        break;
+      case CommandType::TEST_JOG:
+        handleTestJog(command);
+        break;
+      case CommandType::SERVO_STATUS:
+        handleServoStatus(command.servo_id);
+        break;
+      case CommandType::SERVO_OFF:
+        logMessage("SERVO_OFF id=%u result=%s", command.servo_id,
+                   sts_servo_bus.torqueOff(command.servo_id) ? "OK" : "FAILED");
+        break;
+      case CommandType::SERVO_ANGLE:
+      case CommandType::SERVO_TURN:
+        handleServoMove(command);
         break;
       case CommandType::AB_TIMED:
         if (ensureTmcReadyForMotion("AB_TIMED")) {
@@ -938,6 +1157,16 @@ void motionTask(void*) {
         vTaskDelay(pdMS_TO_TICKS(command.dwell_ms));
         break;
       case CommandType::PEN_UP:
+        if (!PEN_SERVO_ENABLED) {
+          if (command.from_gcode) {
+            pen_controller.penUp();
+            machine_state.pen_down = false;
+            logMessage("PEN UP skipped: no pen servo assigned");
+          } else {
+            logMessage("ERROR: PENUP disabled: no pen servo assigned (PEN_SERVO_ENABLED=false)");
+          }
+          break;
+        }
         if (pen_controller.penUp()) {
           machine_state.pen_down = false;
           postLedStatus(LedStatus::DRAWING_PEN_UP);
@@ -955,6 +1184,16 @@ void motionTask(void*) {
         }
         break;
       case CommandType::PEN_DOWN:
+        if (!PEN_SERVO_ENABLED) {
+          if (command.from_gcode) {
+            pen_controller.penDown();
+            machine_state.pen_down = true;
+            logMessage("PEN DOWN skipped: no pen servo assigned");
+          } else {
+            logMessage("ERROR: PENDOWN disabled: no pen servo assigned (PEN_SERVO_ENABLED=false)");
+          }
+          break;
+        }
         if (safety_manager.isAlarmed()) {
           logMessage("ERROR: PEN DOWN blocked; machine alarmed");
           break;
@@ -976,6 +1215,10 @@ void motionTask(void*) {
         }
         break;
       case CommandType::PEN_STATUS: {
+        if (!PEN_SERVO_ENABLED) {
+          logMessage("PEN_STATUS disabled: no pen servo assigned (use SERVO_STATUS <id>)");
+          break;
+        }
         int position = -1;
         if (pen_controller.ping() && pen_controller.readPosition(position)) {
           logMessage("PEN_STATUS OK id=%u position=%d (0..%u) commanded=%s",
@@ -991,6 +1234,9 @@ void motionTask(void*) {
         break;
       case CommandType::TMC_INIT:
         machine_state.tmc_ready = tmc_manager.begin();
+        last_tmc_health = machine_state.tmc_ready ? TMC2209Health::OK
+                                                  : TMC2209Health::NO_REPLY;
+        last_tmc_check_ms = millis();
         break;
       case CommandType::TMC_STATUS:
         tmc_manager.printStatus();
@@ -1070,6 +1316,10 @@ void motionTask(void*) {
         logMessage("ABORT complete");
         break;
       case CommandType::JOB_BEGIN:
+        if (machine_state.test_mode_active) {
+          logMessage("REJECT: JOB_BEGIN test_mode_active (send TEST_MODE OFF, then HOME)");
+          break;
+        }
         if (prepareJobBeginAutoHome() &&
             job_controller.beginJob(currentJobPreflight(), safety_manager,
                                     machine_state, pen_controller,

@@ -12,6 +12,7 @@
 #include "MachineState.h"
 #include "NeoPixelController.h"
 #include "PenController.h"
+#include "StsServoBus.h"
 #include "PlotterConfig.h"
 #include "StepperBackendFastAccel.h"
 #include "TMC2209Manager.h"
@@ -33,7 +34,8 @@ volatile bool hw_stop_requested = false;
 // the same ownership model as the main firmware.
 StepperBackendFastAccel stepper_backend;
 TMC2209Manager tmc_manager(Serial2);
-PenController pen_controller;
+StsServoBus sts_servo_bus;
+PenController pen_controller(sts_servo_bus);
 NeoPixelController neopixel_controller;
 
 void logMessage(const char* format, ...) {

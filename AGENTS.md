@@ -208,10 +208,11 @@ TMC2209Manager
 ```
 
 ```text
-PenController
+PenController / test mode SERVO_*
+  -> StsServoBus
   -> Serial1 UART (GPIO32 TX / GPIO33 RX)
   -> half-duplex TTL Bus Servo Adapter
-  -> FEETECH STS3020
+  -> FEETECH STS3020 ID 1 (Z drum) / ID 2 (arm)
 ```
 
 ```text
@@ -301,9 +302,16 @@ Diagnostics
 ### `PenController`
 
 - ペン上げ/下げ
-- STS3020 UART角度制御、疎通・現在位置読出し
+- STS3020 UART角度制御、疎通・現在位置読出し(StsServoBus経由)
 - 起動時は自動位置指令を行わない
 - PENUP/PENDOWN/M3/M5と、診断用PEN_STATUSに接続する
+- UFO構成ではペン用サーボ未割当(`PEN_SERVO_ENABLED=false`)。PENUP/PENDOWNはERROR、M3/M5とジョブのpen upはサーボを動かさない
+
+### `StsServoBus`
+
+- UART1(STS3020バス)を所有する唯一のモジュール。Core 1からのみ使う
+- ID 1/2のPing、状態読出し、torque OFF
+- テストモードの角度指定・多回転移動(折り返し補正、hold check、runaway guard)
 
 ### `Diagnostics`
 
