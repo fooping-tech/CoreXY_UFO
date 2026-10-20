@@ -1054,3 +1054,115 @@ h2 {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* Test page */
+.test-header .panel-header {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.test-actions,
+.servo-row,
+.test-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.test-status-row {
+  justify-content: space-between;
+}
+
+.test-result {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+#testModeState.test-on {
+  color: var(--state-warning);
+}
+
+.test-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.limit-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.limit-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.limit-indicator .limit-name {
+  font-size: 13px;
+}
+
+.limit-indicator .limit-value {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.limit-indicator.on {
+  background: color-mix(in srgb, var(--state-alarm) 30%, transparent);
+  border-color: var(--state-alarm);
+}
+
+.limit-indicator.off {
+  background: color-mix(in srgb, var(--state-ready) 18%, transparent);
+  border-color: var(--state-ready);
+}
+
+.test-check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.test-button-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.servo-panel .servo-row {
+  margin-top: 10px;
+}
+
+.servo-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.servo-panel input {
+  width: 140px;
+}
+
+.servo-status {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+#test [data-test-xy="0,1"] { grid-column: 2; grid-row: 1; }
+#test [data-test-xy="-1,0"] { grid-column: 1; grid-row: 2; }
+#test [data-test-xy="1,0"] { grid-column: 3; grid-row: 2; }
+#test [data-test-xy="0,-1"] { grid-column: 2; grid-row: 3; }

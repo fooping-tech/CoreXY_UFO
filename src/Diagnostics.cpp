@@ -10,7 +10,9 @@ void Diagnostics::printHelp() {
   logMessage("HELP CONFIG POS ZERO TEST_A <steps> TEST_B <steps> AB_TIMED <a_steps> <b_steps> <duration_us>");
   logMessage("XY <x_mm> <y_mm> [feed_mm_min] HOME HOME_X HOME_Y HOME_STATUS LIMIT_STATUS ALARM_CLEAR ABORT");
   logMessage("JOB_BEGIN JOB_END JOB_ABORT JOB_STATUS");
-  logMessage("PENUP PENDOWN PEN_STATUS SELFTEST TMC_INIT TMC_STATUS");
+  logMessage("PENUP PENDOWN PEN_STATUS (disabled while PEN_SERVO_ENABLED=false) SELFTEST TMC_INIT TMC_STATUS");
+  logMessage("TEST_MODE <ON|OFF> TEST_JOG <dx_mm> <dy_mm> [feed] TEST_A/TEST_B <steps> [feed]");
+  logMessage("SERVO_STATUS <id> SERVO_ANGLE <id> <deg> SERVO_TURN <id> <turns> SERVO_OFF <id>");
   logMessage("G0/G1 X Y F G4 P<ms> G20 G21 G28 G90 G91 M3 M5 M114");
   logMessage("NeoPixel commands DISABLED (GPIO33 used by STS3020 UART RX)");
   logMessage("LED_PATTERN <OFF|SOLID|PACIFICA|FIRE|BREATH|CHASE|PROGRESS|ALERT|SUCCESS>");
@@ -49,7 +51,8 @@ void Diagnostics::printConfig() {
   logMessage("JOB state=%s result=%s last_error=%s",
              job_controller.stateName(), job_controller.result(),
              job_controller.lastError());
-  logMessage("JOB_BEGIN auto_home=%u", JOB_BEGIN_AUTO_HOME);
+  logMessage("JOB_BEGIN auto_home=%u HOME park_after_home=%u", JOB_BEGIN_AUTO_HOME,
+             HOMING_PARK_AFTER_HOME_ENABLED);
   logMessage("JOB_END park_enabled=%u park=(%.3f,%.3f) park_feed=%.3f jingle_enabled=%u",
              JOB_END_PARK_ENABLED, JOB_END_PARK_X_MM, JOB_END_PARK_Y_MM,
              JOB_END_PARK_FEED_MM_MIN, JOB_END_JINGLE_ENABLED);
@@ -69,7 +72,7 @@ void Diagnostics::printConfig() {
 
 void Diagnostics::printPosition(const StatusMessage& status) {
   const MachineState& state = status.machine;
-  logMessage("POS X=%.3f Y=%.3f A=%ld B=%ld F=%.3f EN=HARDWIRED_ACTIVE HOMED=%s X_HOMED=%s Y_HOMED=%s HOMING=%s MOTION=%s JOB=%s PEN=%s ALARM=%s ALARM_REASON=\"%s\" TMC=%s LIMIT_X=%s LIMIT_Y=%s LIMIT_X_RAW=%s LIMIT_Y_RAW=%s",
+  logMessage("POS X=%.3f Y=%.3f A=%ld B=%ld F=%.3f EN=HARDWIRED_ACTIVE HOMED=%s X_HOMED=%s Y_HOMED=%s HOMING=%s MOTION=%s JOB=%s PEN=%s ALARM=%s ALARM_REASON=\"%s\" TMC=%s LIMIT_X=%s LIMIT_Y=%s LIMIT_X_RAW=%s LIMIT_Y_RAW=%s TEST_MODE=%s",
              state.x_mm, state.y_mm, state.a_steps, state.b_steps,
              state.feed_mm_min, state.homed ? "YES" : "NO",
              state.x_homed ? "YES" : "NO", state.y_homed ? "YES" : "NO",
@@ -82,7 +85,8 @@ void Diagnostics::printPosition(const StatusMessage& status) {
              status.x_limit_active ? "ACTIVE" : "OPEN",
              status.y_limit_active ? "ACTIVE" : "OPEN",
              status.x_limit_raw_active ? "ACTIVE" : "OPEN",
-             status.y_limit_raw_active ? "ACTIVE" : "OPEN");
+             status.y_limit_raw_active ? "ACTIVE" : "OPEN",
+             state.test_mode_active ? "ON" : "OFF");
 }
 
 void Diagnostics::printLimitStatus(const StatusMessage& status) {

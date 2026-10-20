@@ -2,11 +2,16 @@
 
 #include <stdint.h>
 
-// Core 1 owned FEETECH STS3020 position controller.
+class StsServoBus;
+
+// Core 1 owned pen interface on the STS3020 bus (StsServoBus owns the UART).
 // Commands wait for encoder feedback within a bounded timeout.
 // Encoder arrival does not establish that the external pen mechanism is clear.
+// With PEN_SERVO_ENABLED == false no servo is assigned to the pen: penUp() and
+// penDown() only update the logical state and never move a servo.
 class PenController {
  public:
+  explicit PenController(StsServoBus& bus) : bus_(bus) {}
   bool begin();
   bool ping();
   bool readPosition(int& position);
@@ -18,6 +23,6 @@ class PenController {
 
  private:
   bool writeAngle(unsigned angle_deg);
-  bool initialized_ = false;
+  StsServoBus& bus_;
   bool pen_down_ = false;
 };

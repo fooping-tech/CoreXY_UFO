@@ -1,0 +1,20 @@
+command,delay_ms,expect,comment
+POS,500,TEST_MODE=OFF,Normal mode at boot
+SERVO_TURN 1 0.25,500,result=REJECTED,Servo moves are rejected outside test mode
+TEST_JOG 1 0,500,result=REJECTED,XY test moves are rejected outside test mode
+TEST_MODE ON,500,TEST_MODE result=ON,Enter test mode
+POS,500,TEST_MODE=ON,Confirm test mode and LIMIT_X/Y + RAW fields
+TEST_JOG 60 0,500,reason=distance_over,Over 50 mm is rejected
+TEST_JOG 1 0,5000,TEST_JOG result=,+X 1 mm (DONE or STOPPED_LIMIT; tmc_not_ready if VM off)
+TEST_JOG -1 0,5000,TEST_JOG result=,-X 1 mm toward the X switch
+TEST_JOG 0 1,5000,TEST_JOG result=,+Y 1 mm
+TEST_JOG 0 -1,5000,TEST_JOG result=,-Y 1 mm toward the Y switch
+TEST_A 80 600,5000,TEST_A result=,Motor A only +80 steps
+TEST_B -80 600,5000,TEST_B result=,Motor B only -80 steps
+SERVO_STATUS 1,1000,SERVO_STATUS id=1,ID1 Z drum status
+SERVO_STATUS 2,1000,SERVO_STATUS id=2,ID2 arm status
+SERVO_TURN 1 0.25,6000,SERVO_TURN id=1,ID1 quarter turn clockwise (no load)
+SERVO_TURN 1 -0.25,6000,SERVO_TURN id=1,ID1 back
+SERVO_ANGLE 2 180,6000,SERVO_ANGLE id=2,ID2 to 180 deg by the shortest path
+SERVO_OFF 2,1000,SERVO_OFF id=2,ID2 torque off
+TEST_MODE OFF,500,TEST_MODE result=OFF,Leave test mode (HOME before jobs)

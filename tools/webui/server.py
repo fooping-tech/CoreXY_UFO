@@ -78,11 +78,22 @@ state: dict[str, object] = {
         "homing": False,
         "motion": False,
         "limits": {"x": "UNKNOWN", "y": "UNKNOWN"},
+        "limitsRaw": {"x": "UNKNOWN", "y": "UNKNOWN"},
         "tmc": "UNKNOWN",
+        "testMode": False,
     },
+    "testBusy": False,
+    "testCommand": "",
+    "lastTestResult": "",
+    "servos": {sid: {} for sid in ("1", "2")},
 }
 job_process: subprocess.Popen[str] | None = None
 job_process_lock = threading.Lock()
+# One serial_send process at a time for console/test commands and test polls.
+# Jobs keep their own long-running process and are not mixed with test mode.
+serial_lock = threading.Lock()
+test_process: subprocess.Popen[str] | None = None
+test_process_lock = threading.Lock()
 
 
 POS_RE = re.compile(
@@ -102,6 +113,27 @@ JOB_RE = re.compile(r"JOB=(ACTIVE|IDLE)|JOB_STATUS state=(RUNNING|STARTING|ENDIN
 PEN_RE = re.compile(r"PEN=(UP|DOWN)|pen:\s*(UP|DOWN)|PEN\s+(UP|DOWN)", re.IGNORECASE)
 LIMIT_RE = re.compile(r"LIMIT_X=(OPEN|ACTIVE|ON|OFF).*LIMIT_Y=(OPEN|ACTIVE|ON|OFF)", re.IGNORECASE)
 TMC_RE = re.compile(r"TMC[:=]\s*(READY|NOT READY|OFF)", re.IGNORECASE)
+TEST_MODE_RE = re.compile(r"\bTEST_MODE(?:=| result=)(ON|OFF)\b")
+LIMIT_RAW_RE = re.compile(r"LIMIT_X_RAW=(OPEN|ACTIVE).*LIMIT_Y_RAW=(OPEN|ACTIVE)")
+TEST_RESULT_RE = re.compile(
+    r"^(TEST_MODE|TEST_JOG|TEST_A|TEST_B|SERVO_ANGLE|SERVO_TURN|SERVO_OFF|SERVO_STATUS)\b.*\bresult=(\S+)"
+)
+SERVO_LINE_RE = re.compile(r"^(SERVO_\w+) id=(\d+)\b(.*)$")
+KEY_VALUE_RE = re.compile(r"(\w+)=(\S+)")
+
+# Test page commands. Anything else must go through the Console.
+NUMBER = r"-?\d+(?:\.\d+)?"
+TEST_COMMAND_PATTERNS: list[tuple[re.Pattern[str], str, float]] = [
+    # (pattern, expect, timeout_s)
+    (re.compile(r"TEST_MODE (?:ON|OFF)"), "TEST_MODE result=", 8.0),
+    (re.compile(rf"TEST_JOG {NUMBER} {NUMBER}(?: {NUMBER})?"), "TEST_JOG result=", 40.0),
+    (re.compile(rf"TEST_[AB] -?\d+(?: {NUMBER})?"), "result=", 40.0),
+    (re.compile(r"SERVO_(?:STATUS|OFF) [12]"), "result=", 8.0),
+    (re.compile(rf"SERVO_ANGLE [12] {NUMBER}"), "SERVO_ANGLE id=", 40.0),
+    (re.compile(rf"SERVO_TURN [12] {NUMBER}"), "SERVO_TURN id=", 40.0),
+    (re.compile(r"POS"), "POS ", 8.0),
+    (re.compile(r"ALARM_CLEAR"), "ALARM_CLEAR complete", 8.0),
+]
 GCODE_WORD_RE = re.compile(r"([A-Z])\s*(-?\d+(?:\.\d+)?)", re.IGNORECASE)
 
 
@@ -113,6 +145,7 @@ def emit(kind: str, message: str, **extra: object) -> None:
     event = {"time": now_ms(), "kind": kind, "message": message, **extra}
     log_queue.put(event)
     update_state_from_log(message)
+    update_test_state_from_log(message)
 
 
 def classify_line(line: str) -> str:
@@ -234,6 +267,42 @@ def update_state_from_log(line: str) -> None:
         state["machine"] = machine
 
 
+def validate_test_command(command: str) -> tuple[str, float]:
+    """Return (expect, timeout_s) for an allowed test page command."""
+    for pattern, expect, timeout_s in TEST_COMMAND_PATTERNS:
+        if pattern.fullmatch(command):
+            return expect, timeout_s
+    raise ValueError(f"command not allowed on the test page: {command!r}")
+
+
+def update_test_state_from_log(line: str) -> None:
+    line = line.strip()
+    with state_lock:
+        machine = dict(state["machine"])
+        match = TEST_MODE_RE.search(line)
+        if match:
+            machine["testMode"] = match.group(1) == "ON"
+        match = LIMIT_RAW_RE.search(line)
+        if match:
+            machine["limitsRaw"] = {"x": match.group(1), "y": match.group(2)}
+        state["machine"] = machine
+        if TEST_RESULT_RE.match(line):
+            state["lastTestResult"] = line
+        match = SERVO_LINE_RE.match(line)
+        if match and match.group(2) in state["servos"]:
+            servos = dict(state["servos"])
+            servo = dict(servos[match.group(2)])
+            fields = dict(KEY_VALUE_RE.findall(match.group(3)))
+            if match.group(1) == "SERVO_STATUS":
+                servo.update(fields)
+                servo["updated"] = now_ms()
+            else:
+                servo["lastResult"] = f"{match.group(1)} {fields.get('result', '?')}"
+                servo["lastDetail"] = match.group(3).strip()
+            servos[match.group(2)] = servo
+            state["servos"] = servos
+
+
 def list_ports() -> list[str]:
     ports: set[str] = set()
     for entry in os.scandir("/dev"):
@@ -269,13 +338,76 @@ def run_serial_send(args: list[str], *, label: str) -> int:
     return exit_code
 
 
-def write_command_csv(command: str) -> Path:
+def write_command_csv(command: str, expect: str = "") -> Path:
     temp = tempfile.NamedTemporaryFile("w", newline="", suffix=".csv", delete=False)
     with temp:
         writer = csv.DictWriter(temp, fieldnames=["command", "delay_ms", "expect", "comment"])
         writer.writeheader()
-        writer.writerow({"command": command, "delay_ms": "0", "expect": "", "comment": "webui"})
+        writer.writerow({"command": command, "delay_ms": "0", "expect": expect, "comment": "webui"})
     return Path(temp.name)
+
+
+def run_locked_command(args: list[str], *, label: str) -> int:
+    with serial_lock:
+        return run_serial_send(args, label=label)
+
+
+def run_test_command(args: list[str], *, command: str) -> None:
+    global test_process
+    with serial_lock:
+        cmd = [sys.executable, str(SERIAL_SEND), *args]
+        emit("sent", f"> {command}")
+        process = subprocess.Popen(
+            cmd,
+            cwd=REPO_ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        with test_process_lock:
+            test_process = process
+        try:
+            assert process.stdout is not None
+            for raw_line in process.stdout:
+                line = raw_line.rstrip("\n")
+                if line.startswith(">"):
+                    continue
+                emit(classify_line(line), line)
+            exit_code = process.wait()
+            if exit_code != 0:
+                emit("error", f"test command {command} exited with code {exit_code}")
+        finally:
+            with test_process_lock:
+                test_process = None
+            with state_lock:
+                state["testBusy"] = False
+                state["testCommand"] = ""
+
+
+def poll_status_quietly(args: list[str]) -> bool:
+    """Run POS without flooding the log. Returns False when the port is busy."""
+    if not serial_lock.acquire(blocking=False):
+        return False
+    try:
+        process = subprocess.run(
+            [sys.executable, str(SERIAL_SEND), *args],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        for line in (process.stdout + process.stderr).splitlines():
+            update_state_from_log(line)
+            update_test_state_from_log(line)
+            if classify_line(line) == "error" and "ALARM=YES" not in line:
+                emit("error", line)
+        return True
+    except subprocess.TimeoutExpired:
+        emit("error", "test poll timed out")
+        return True
+    finally:
+        serial_lock.release()
 
 
 def clamp_float(value: object, *, name: str, minimum: float, maximum: float) -> float:
@@ -552,6 +684,10 @@ def snapshot_state() -> dict[str, object]:
             "jobRunning": state["jobRunning"],
             "lastExitCode": state["lastExitCode"],
             "machine": machine,
+            "testBusy": state["testBusy"],
+            "testCommand": state["testCommand"],
+            "lastTestResult": state["lastTestResult"],
+            "servos": json.loads(json.dumps(state["servos"])),
         }
 
 
@@ -762,6 +898,12 @@ class WebUIHandler(SimpleHTTPRequestHandler):
                 self.handle_image_gcode()
             elif parsed.path == "/api/settings":
                 self.handle_settings()
+            elif parsed.path == "/api/test/command":
+                self.handle_test_command()
+            elif parsed.path == "/api/test/stop":
+                self.handle_test_stop()
+            elif parsed.path == "/api/test/poll":
+                self.handle_test_poll()
             else:
                 send_json(self, {"error": "not found"}, HTTPStatus.NOT_FOUND)
         except Exception as exc:  # Keep UI failures visible without crashing the server.
@@ -803,12 +945,70 @@ class WebUIHandler(SimpleHTTPRequestHandler):
             raise ValueError("serial port is not configured")
         csv_path = write_command_csv(command)
         threading.Thread(
-            target=run_serial_send,
+            target=run_locked_command,
             args=(command_args(port, baud, csv_path, settings),),
             kwargs={"label": f"command {command}"},
             daemon=True,
         ).start()
         send_json(self, {"ok": True})
+
+    def test_port_settings(self) -> tuple[str, int, dict[str, object]]:
+        with state_lock:
+            port = str(state.get("port", ""))
+            baud = int(state.get("baud", DEFAULT_BAUD))
+            settings = dict(state.get("sendSettings", DEFAULT_SEND_SETTINGS))
+            job_running = bool(state.get("jobRunning"))
+        if not port:
+            raise ValueError("serial port is not configured")
+        if job_running:
+            raise ValueError("test mode is not available while a job is running")
+        return port, baud, settings
+
+    def handle_test_command(self) -> None:
+        body = read_json(self)
+        command = " ".join(str(body.get("command", "")).split())
+        expect, timeout_s = validate_test_command(command)
+        port, baud, settings = self.test_port_settings()
+        with state_lock:
+            if state["testBusy"]:
+                raise ValueError(f"test command busy: {state['testCommand']}")
+            state["testBusy"] = True
+            state["testCommand"] = command
+        settings = {**settings, "commandTimeoutS": timeout_s}
+        csv_path = write_command_csv(command, expect)
+        threading.Thread(
+            target=run_test_command,
+            args=(command_args(port, baud, csv_path, settings),),
+            kwargs={"command": command},
+            daemon=True,
+        ).start()
+        send_json(self, {"ok": True})
+
+    def handle_test_stop(self) -> None:
+        port, baud, settings = self.test_port_settings()
+        with test_process_lock:
+            process = test_process
+        if process is not None and process.poll() is None:
+            # Free the port; the firmware keeps running until ABORT arrives.
+            process.terminate()
+        csv_path = write_command_csv("ABORT", "ABORT complete")
+        threading.Thread(
+            target=run_locked_command,
+            args=(command_args(port, baud, csv_path, settings),),
+            kwargs={"label": "test STOP (ABORT)"},
+            daemon=True,
+        ).start()
+        send_json(self, {"ok": True})
+
+    def handle_test_poll(self) -> None:
+        port, baud, settings = self.test_port_settings()
+        with state_lock:
+            busy = bool(state["testBusy"])
+        polled = False
+        if not busy:
+            csv_path = write_command_csv("POS", "POS ")
+            polled = poll_status_quietly(command_args(port, baud, csv_path, settings))
+        send_json(self, {"ok": True, "polled": polled, "state": snapshot_state()})
 
     def handle_job(self) -> None:
         global job_process

@@ -22,6 +22,7 @@
       <aside class="sidebar">
         <button class="nav active" data-page="dashboard" type="button">Dashboard</button>
         <button class="nav" data-page="control" type="button">Control</button>
+        <button class="nav" data-page="test" type="button">Test</button>
         <button class="nav" data-page="job" type="button">Job</button>
         <button class="nav" data-page="fun" type="button">Fun</button>
         <button class="nav" data-page="console" type="button">Console <span id="errorCount">0</span></button>
@@ -458,6 +459,94 @@
           </form>
         </section>
 
+        <section id="test" class="page">
+          <article class="panel test-header">
+            <div class="panel-header">
+              <div>
+                <div class="label">Test Mode</div>
+                <h2 id="testModeState">OFF</h2>
+              </div>
+              <div class="test-actions">
+                <button id="testEnterBtn" class="warning" type="button">ENTER TEST MODE</button>
+                <button id="testExitBtn" class="secondary" type="button">EXIT TEST MODE</button>
+                <button id="testClearAlarmBtn" class="secondary" type="button">CLEAR ALARM</button>
+                <button id="testStopBtn" class="danger large" type="button">STOP</button>
+              </div>
+            </div>
+            <p class="muted">
+              ホーミングなしで動かせます。動かすとHOMEDは解除されます。
+              TEST_JOG / モータ移動はリミットがONになった時点で停止し、ONのリミットへ向かう移動は拒否されます。
+              STOPはABORTを送るため、その後CLEAR ALARMが必要です。終了後はHOMEしてからジョブを実行してください。
+            </p>
+            <div class="test-status-row">
+              <span id="testBusyText" class="muted">Idle</span>
+              <code id="testLastResult" class="test-result">-</code>
+            </div>
+          </article>
+          <div class="test-grid">
+            <article class="panel">
+              <div class="label">Limit Switches</div>
+              <h2>Limits</h2>
+              <div class="limit-grid">
+                <div id="testLimitX" class="limit-indicator unknown">
+                  <span class="limit-name">X</span>
+                  <span class="limit-value">?</span>
+                  <span class="limit-raw muted">raw ?</span>
+                </div>
+                <div id="testLimitY" class="limit-indicator unknown">
+                  <span class="limit-name">Y</span>
+                  <span class="limit-value">?</span>
+                  <span class="limit-raw muted">raw ?</span>
+                </div>
+              </div>
+              <label class="test-check"><input id="testAutoPoll" type="checkbox" checked> Auto refresh (POS every 1.5s)</label>
+            </article>
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <div class="label">Single Motor (no homing)</div>
+                  <h2>Motors</h2>
+                </div>
+                <div class="segmented" id="testMotorStepControl">
+                  <button data-steps="80" type="button">80</button>
+                  <button class="active" data-steps="400" type="button">400</button>
+                  <button data-steps="1600" type="button">1600</button>
+                </div>
+              </div>
+              <div class="test-button-grid">
+                <button class="test-move" data-test-motor="A" data-sign="1" type="button">A+ <small>(+X +Y)</small></button>
+                <button class="test-move" data-test-motor="A" data-sign="-1" type="button">A- <small>(-X -Y)</small></button>
+                <button class="test-move" data-test-motor="B" data-sign="1" type="button">B+ <small>(+X -Y)</small></button>
+                <button class="test-move" data-test-motor="B" data-sign="-1" type="button">B- <small>(-X +Y)</small></button>
+              </div>
+              <div class="muted">steps / 80 = motor mm. 600 mm/min.</div>
+            </article>
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <div class="label">XY (no homing)</div>
+                  <h2>X / Y Move</h2>
+                </div>
+                <div class="segmented" id="testXyStepControl">
+                  <button data-mm="1" type="button">1</button>
+                  <button class="active" data-mm="5" type="button">5</button>
+                  <button data-mm="10" type="button">10</button>
+                  <button data-mm="50" type="button">50</button>
+                </div>
+              </div>
+              <div class="jog-pad">
+                <button class="jog test-move" data-test-xy="0,1" type="button">+Y</button>
+                <button class="jog test-move" data-test-xy="-1,0" type="button">-X</button>
+                <div id="testXyStepLabel" class="jog-center">5mm</div>
+                <button class="jog test-move" data-test-xy="1,0" type="button">+X</button>
+                <button class="jog test-move" data-test-xy="0,-1" type="button">-Y</button>
+              </div>
+              <div class="muted">-X / -Y = toward the limit switch. 600 mm/min, max 50 mm.</div>
+            </article>
+          </div>
+          <div id="testServoPanels" class="test-grid"></div>
+        </section>
+
         <section id="settings" class="page">
           <article class="panel settings-panel">
             <div class="label">Serial</div>
@@ -500,5 +589,6 @@
     </div>
 
     <script src="/app.js"></script>
+    <script src="/test_mode.js"></script>
   </body>
 </html>

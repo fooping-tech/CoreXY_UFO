@@ -170,6 +170,7 @@ function updateStateUI() {
   $("abortJobBtn").disabled = !isConnected();
   $("topAbortBtn").disabled = !isConnected();
   syncSendSettingsFromState();
+  window.updateTestModeUI?.();
 }
 
 function canSendJob() {

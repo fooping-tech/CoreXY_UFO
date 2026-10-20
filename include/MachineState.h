@@ -17,6 +17,8 @@ struct MachineState {
   bool homing_active = false;
   bool motion_active = false;
   bool job_active = false;
+  // Serial/WebUI test mode: allows un-homed TEST_JOG and SERVO_* moves.
+  bool test_mode_active = false;
   char homing_state[16] = "Idle";
 };
 
@@ -61,5 +63,6 @@ struct StatusMessage {
 };
 
 struct LogMessage {
-  char text[192];
+  // POS with LIMIT_*_RAW and TEST_MODE is ~280 chars; shorter buffers cut it.
+  char text[320];
 };

@@ -11,6 +11,7 @@
 #include "PenController.h"
 #include "SafetyManager.h"
 #include "StepperBackendFastAccel.h"
+#include "StsServoBus.h"
 #include "TMC2209Manager.h"
 
 extern QueueHandle_t command_queue;
@@ -22,6 +23,7 @@ extern DiagnosticsState diagnostics_state;
 extern SafetyManager safety_manager;
 extern StepperBackendFastAccel stepper_backend;
 extern TMC2209Manager tmc_manager;
+extern StsServoBus sts_servo_bus;
 extern PenController pen_controller;
 extern NeoPixelController neopixel_controller;
 extern LedPatternEngine led_pattern_engine;

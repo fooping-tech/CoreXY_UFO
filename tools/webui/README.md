@@ -207,6 +207,19 @@ auto motion timeoutを変更できます。保存した値は以後のmanual com
 長いtravel move直後の`M3/M5`で`timeout after ... waiting for 'PEN DOWN'`などが出る場合は、
 前の移動が終わる前にホスト側timeoutへ到達しています。Serial Toolは推定motion時間をtimeoutへ自動で足しますが、実機が推定より大幅に遅い場合は`--motion-timeout-margin`を調整します。
 
+## Test Mode
+
+`Test`タブは、ホーミングなしの診断操作用です。
+- `ENTER TEST MODE`で通常ファームウェアの`TEST_MODE ON`を送る
+- リミットX/Y(debounced/raw)を`POS`の定期取得(1.5秒)で表示
+- モータA/B単独、X/Y方向の相対移動(`TEST_JOG`、最大50mm、リミットONで停止)
+- シリアルサーボID 1(Z軸ドラム)/ID 2(アーム)の角度指定、±3回転までの回転、torque OFF
+- `STOP`は実行中のテストコマンドを止めて`ABORT`を送る
+
+サーバーは`/api/test/command`で許可したコマンドだけを送り、各コマンドの`result=`行まで待つ。
+Consoleのコマンド、テストコマンド、定期取得は1つずつ順番にシリアルへ送る(ジョブ実行中はTestタブ無効)。
+手順は[tools/serial_tool/docs/webui-test-mode-check.md](../serial_tool/docs/webui-test-mode-check.md)。
+
 ## Safety Model
 
 The WebUI disables controls based on the host-visible state, but firmware remains the source of

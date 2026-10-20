@@ -208,12 +208,52 @@ CommandMessage CommandDispatcher::parse(const char* line) {
     command.type = CommandType::AB_TIMED;
   }
   else if (strcmp(name, "TEST_A") == 0 || strcmp(name, "TEST_B") == 0) {
-    if (sscanf(line, "%*s %ld", &command.steps) != 1) {
-      snprintf(command.error, sizeof(command.error), "%s requires <steps>", name);
+    // Optional feed: > 0 runs at that feed, otherwise the backend default speed.
+    if (sscanf(line, "%*s %ld %f", &command.steps, &command.feed_mm_min) < 1) {
+      snprintf(command.error, sizeof(command.error),
+               "%s requires <steps> [feed_mm_min]", name);
       return command;
     }
     command.type = strcmp(name, "TEST_A") == 0 ? CommandType::TEST_A
                                                 : CommandType::TEST_B;
+  } else if (strcmp(name, "TEST_MODE") == 0) {
+    char mode[8] = {};
+    if (sscanf(line, "%*s %7s", mode) != 1 ||
+        (strcmp(mode, "ON") != 0 && strcmp(mode, "OFF") != 0)) {
+      snprintf(command.error, sizeof(command.error), "TEST_MODE requires ON or OFF");
+      return command;
+    }
+    command.enable = strcmp(mode, "ON") == 0;
+    command.type = CommandType::TEST_MODE;
+  } else if (strcmp(name, "TEST_JOG") == 0) {
+    command.feed_mm_min = TEST_JOG_DEFAULT_FEED_MM_MIN;
+    if (sscanf(line, "%*s %f %f %f", &command.x_mm, &command.y_mm,
+               &command.feed_mm_min) < 2) {
+      snprintf(command.error, sizeof(command.error),
+               "TEST_JOG requires <dx_mm> <dy_mm> [feed_mm_min]");
+      return command;
+    }
+    command.type = CommandType::TEST_JOG;
+  } else if (strcmp(name, "SERVO_STATUS") == 0 || strcmp(name, "SERVO_OFF") == 0 ||
+             strcmp(name, "SERVO_ANGLE") == 0 || strcmp(name, "SERVO_TURN") == 0) {
+    const bool needs_value =
+        strcmp(name, "SERVO_ANGLE") == 0 || strcmp(name, "SERVO_TURN") == 0;
+    int id = 0;
+    const int parsed = sscanf(line, "%*s %d %f", &id, &command.servo_value);
+    if (parsed < (needs_value ? 2 : 1) || id < STS_SERVO_ID_MIN ||
+        id > STS_SERVO_ID_MAX) {
+      snprintf(command.error, sizeof(command.error), "%s requires <id %u..%u>%s", name,
+               STS_SERVO_ID_MIN, STS_SERVO_ID_MAX,
+               strcmp(name, "SERVO_ANGLE") == 0   ? " <deg>"
+               : strcmp(name, "SERVO_TURN") == 0 ? " <turns>"
+                                                 : "");
+      return command;
+    }
+    command.servo_id = static_cast<uint8_t>(id);
+    if (strcmp(name, "SERVO_STATUS") == 0) command.type = CommandType::SERVO_STATUS;
+    else if (strcmp(name, "SERVO_OFF") == 0) command.type = CommandType::SERVO_OFF;
+    else if (strcmp(name, "SERVO_ANGLE") == 0) command.type = CommandType::SERVO_ANGLE;
+    else command.type = CommandType::SERVO_TURN;
   } else if (strcmp(name, "XY") == 0) {
     int parsed = sscanf(line, "%*s %f %f %f", &command.x_mm, &command.y_mm,
                         &command.feed_mm_min);

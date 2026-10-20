@@ -17,6 +17,9 @@ struct CommandMessage {
   int32_t b_steps = 0;
   uint32_t duration_us = 0;
   uint32_t dwell_ms = 0;
+  bool enable = false;      // TEST_MODE ON/OFF
+  uint8_t servo_id = 0;     // SERVO_*
+  float servo_value = 0.0f; // SERVO_ANGLE [deg] / SERVO_TURN [turn]
   LedCommand led;
   ParsedGcode gcode;
   char error[96] = {};

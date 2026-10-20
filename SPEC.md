@@ -1274,3 +1274,28 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - 実測(無負荷、ID 1、1A電源): MT_JOG +12288(右3回転)/-12288 PASS、15.7s、誤差±2 counts以内、7.9V維持。
 - 実測: 多回転時、goalは多回転値として効くが、Present Positionは1回転ごとに0..4095で折り返す。ファームウェアは20ms周期の読出しで折り返しを補正して絶対位置を追跡する。読出し欠落500ms超、多回転中のOFF、ID切替で追跡を無効化する。
 - 実測: サーボ内部の多回転位置はMT_OFF→MT_ONで保持され、Present Positionからは読めない。現在位置ベースのgoal書込みで1回転分の意図しない回転が発生した。このため多回転中は通常`JOG`/タッチJOGを拒否する。
+
+## 2026-10-21: WebUI テストモード(通常ファームウェア)
+
+- PR #1(STS3020 UART移行)をmainへマージ。Port A(GPIO32/33)はSTS3020バス専用、NeoPixel無効。
+- `StsServoBus`がUART1を所有する唯一のモジュール。`PenController`はStsServoBus経由。
+- `PEN_SERVO_ENABLED=false`(UFO構成ではペン用サーボ未割当)。Serial `PENUP`/`PENDOWN`は`ERROR`、`PEN_STATUS`は無効表示。G-codeのM3/M5は`PEN UP|DOWN skipped: no pen servo assigned`でサーボを動かさない。ジョブ開始/終了のpen upもサーボを動かさない。
+- `TEST_MODE ON|OFF`: テストモードフラグ(`POS`に`TEST_MODE=ON|OFF`)。ONはジョブ中・homing中・モーション中は拒否。テストモード中の`JOB_BEGIN`は`REJECT`。
+- `TEST_JOG <dx_mm> <dy_mm> [feed]`: テストモード必須、ホーミング不要の相対XY移動。|dx|,|dy|<=50mm、feed (0,1200]、既定600mm/min、TMC ready必須。CoreXYKinematicsでA/B変換し`moveABSteps`(bring-up経路)で実行。
+- `TEST_A`/`TEST_B <steps> [feed]`: feed省略時は従来の速度。
+- `TEST_JOG`/`TEST_A`/`TEST_B`共通: 開始時OFFのX/YリミットがON(rawまたはdebounced)になったら即停止(`result=STOPPED_LIMIT limit=X|Y`)。ONのリミットへ向かう成分を持つ移動は`REJECTED`。alarm中は`REJECTED`。実行するとHOMED解除。結果行`<cmd> result=DONE|STOPPED_LIMIT|STOPPED|REJECTED ...`。
+- `SERVO_STATUS <id>` / `SERVO_OFF <id>`(ID 1..2): 常時可。`SERVO_ANGLE <id> <deg>`(0..360未満、最短経路)/ `SERVO_TURN <id> <turns>`(|turns|<=3): テストモード必須。800 counts/s、ACC 20。
+- サーボ移動は初回に多回転追跡を開始(角度制限0/0、EEPROM lockのまま)。開始条件・hold check・runaway guard・折り返し補正・読出し欠落500ms・idle drift検出は2026-10-18の単体試験仕様と同じ。ABORT中はtorque OFFではなく現在位置holdで停止(負荷付きZドラムの落下防止)。runaway時はtorque OFF。追跡位置|abs|<=28000 counts。
+- 多回転追跡はテストモード終了後も保持。ESP32再起動後は、角度制限0/0で静止保持中かつgoalと一致する場合のみ復帰、それ以外はサーボ電源再投入が必要。
+- `LogMessage`を320文字へ拡大(POSの`LIMIT_*_RAW`/`TEST_MODE`が切れていたため)。
+- WebUI: `Test`タブと`/api/test/command`(許可パターンのみ、`result=`行まで待つ)、`/api/test/stop`(実行中プロセス停止→ABORT)、`/api/test/poll`(POSを静かに取得)。Console/テスト/定期取得のserial_sendは排他。
+- FastLEDを3.10.6へ固定(3.10.7がtoolchainでビルド不可)。
+
+## 2026-10-21: TMC2209 起動時初期化・リセット検出、HOME後の退避移動廃止
+
+- 起動時: motionTask開始時に`TMC_INIT`相当(`tmc_manager.begin()`)を1回実行し、microsteps 1/16、1100mA RMS、spreadCycle等を送る。VM未投入で失敗した場合は下記の移動直前チェックで後から適用する。
+- 周期的な状態チェック・設定値の周期書込みはしない(2026-10-21ユーザー判断で待機中500msチェックを削除)。
+- 移動直前チェック: `ensureTmcReadyForMotion()`は前回チェックから`TMC_HEALTH_CHECK_INTERVAL_MS`(500ms)以上経過し、ステッパ停止中なら`TMC2209Manager::checkAndRecover()`を実行する。IOINで応答確認、GSTAT.reset(bit0)で再起動検出。resetを検出したドライバにだけ現在のprofileを再送する(`TMC reset detected ... profile re-applied`)。チェック自体は読出しのみ。
+- 再送(REAPPLIED)または無応答(NO_REPLY)へ遷移した場合、それまでREADYだったならHOMEDを解除する(VM断で保持トルクが失われた可能性)。ログは状態遷移時のみ。
+- `TEST_A`/`TEST_B`(LCDテストモード、WebUI Testタブ含む)も移動前に`ensureTmcReadyForMotion()`を通す。未応答なら`TEST_A result=REJECTED reason=tmc_not_ready`で動かさない。
+- `HOMING_PARK_AFTER_HOME_ENABLED=false`: `HOME`/`G28`/JOB_BEGIN自動homingの完了後にJOB_END退避位置(5, Y_MAX-5)へ移動しない。原点(リミット位置)で終了する。`HOME_X`/`HOME_Y`は従来から退避なし。JOB_ENDの退避は`JOB_END_PARK_ENABLED`のまま。CONFIGに`HOME park_after_home=`を表示。

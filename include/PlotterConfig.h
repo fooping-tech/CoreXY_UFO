@@ -122,6 +122,10 @@ constexpr bool JOB_END_PARK_ENABLED = true;
 constexpr float JOB_END_PARK_X_MM = 5.0f;
 constexpr float JOB_END_PARK_Y_MM = Y_MAX_MM - 5.0f;
 constexpr float JOB_END_PARK_FEED_MM_MIN = 1200.0f;
+// HOME(G28/JOB_BEGIN自動homing含む)完了後にJOB_END退避位置へ移動するか。
+// false: HOMEはX/Y原点(リミット位置)で終了し、Y+方向の退避移動をしない。
+// HOME_X/HOME_Yは従来から退避しない。JOB_ENDの退避はJOB_END_PARK_ENABLEDで別管理。
+constexpr bool HOMING_PARK_AFTER_HOME_ENABLED = false;
 
 // JOB_BEGIN時にhomedでない場合、自動でHOMEを実行するか。
 // trueにするとJOB_BEGINで実機が動くため、limit switchとE-stop確認後に有効化する。
@@ -157,6 +161,49 @@ constexpr uint16_t PEN_SERVO_POSITION_TOLERANCE = 35;  // ~3 degrees
 
 constexpr uint16_t PEN_SERVO_MAX_POSITION = 4095;
 constexpr unsigned PEN_SERVO_FULL_TURN_DEG = 360;
+
+// UFO構成ではID 1 = Z軸ドラム、ID 2 = アームで、ペン用サーボは未割当。
+// false: PENUP/PENDOWNはERROR、G-codeのM3/M5とジョブ開始/終了のpen upは
+// サーボを動かさずスキップする(ID 1のドラムを誤って回さないため)。
+constexpr bool PEN_SERVO_ENABLED = false;
+
+// ============================================================================
+// Serial bus servos (test mode)
+// ============================================================================
+// テストモードで操作するSTS3020のID。ID 1 = Z軸(紐とドラム)、ID 2 = アーム。
+constexpr uint8_t STS_SERVO_ID_MIN = 1;
+constexpr uint8_t STS_SERVO_ID_MAX = 2;
+// 1回転 = 4096 counts。
+constexpr int32_t STS_COUNTS_PER_TURN = 4096;
+// テストモードの低速設定。800 counts/s ~= 70deg/s。ACC単位は100 counts/s^2。
+constexpr uint16_t STS_TEST_SPEED_COUNTS_PER_S = 800;
+constexpr uint8_t STS_TEST_ACC = 20;
+// 1回のSERVO_TURN上限 [turn]と、追跡位置の上限(サーボの多回転goal +/-30719内)。
+constexpr float STS_TEST_MAX_TURNS = 3.0f;
+constexpr int32_t STS_TEST_ABS_LIMIT_COUNTS = 28000;
+// 到達判定、poll周期、timeout余裕。
+constexpr int STS_TEST_TOLERANCE_COUNTS = 5;
+constexpr uint32_t STS_TEST_POLL_INTERVAL_MS = 20;
+constexpr uint32_t STS_TEST_TIMEOUT_MARGIN_MS = 2000;
+// 折り返し補正はpoll間の移動が半回転未満の間だけ有効。800 counts/s * 0.5s = 400 counts。
+constexpr uint32_t STS_TEST_MAX_READ_GAP_MS = 500;
+// hold check: hold + torque ON後この時間で+/-許容を超えて動けば即torque OFF。
+constexpr uint32_t STS_TEST_HOLD_CHECK_MS = 200;
+constexpr int STS_TEST_HOLD_CHECK_TOLERANCE_COUNTS = 10;
+// runaway guard: 逆方向またはdelta超過がこの量を超えたら即torque OFF。
+constexpr int STS_TEST_RUNAWAY_MARGIN_COUNTS = 50;
+static_assert(STS_TEST_MAX_TURNS * STS_COUNTS_PER_TURN < STS_TEST_ABS_LIMIT_COUNTS,
+              "STS_TEST_MAX_TURNS must fit inside STS_TEST_ABS_LIMIT_COUNTS");
+
+// ============================================================================
+// Test mode XY / motor moves (no homing)
+// ============================================================================
+// TEST_JOGの1回の最大移動量 [mm]と既定速度 [mm/min]。limit ONで即停止する。
+constexpr float TEST_JOG_MAX_DISTANCE_MM = 50.0f;
+constexpr float TEST_JOG_DEFAULT_FEED_MM_MIN = 600.0f;
+constexpr float TEST_JOG_MAX_FEED_MM_MIN = 1200.0f;
+static_assert(TEST_JOG_MAX_FEED_MM_MIN <= MAX_FEED_MM_MIN,
+              "TEST_JOG_MAX_FEED_MM_MIN must be <= MAX_FEED_MM_MIN");
 
 // ペン上げ/下げのサーボ角度 [deg]。
 // 決め方: 機構に合わせて、紙を擦らない上げ角と十分に接地する下げ角を実測する。
@@ -328,6 +375,11 @@ constexpr uint8_t TMC_TBL = 2;
 // StallGuardしきい値。現状は診断用placeholder寄り。
 // 値が小さい/大きいと検出感度が変わるため、実機で調整する。
 constexpr uint8_t TMC_SGTHRS_DEFAULT = 80;
+
+// 移動直前のTMC2209ヘルスチェックの最小間隔 [ms]。周期チェックはしない。
+// 前回チェックからこの時間が経ち、ステッパ停止中の移動コマンドでだけ実行する。
+// GSTAT.reset(VM再投入等)を検出したら設定を再送する。モーション中はUARTを読まない。
+constexpr uint32_t TMC_HEALTH_CHECK_INTERVAL_MS = 500;
 
 // StallGuard/CoolStepの有効速度域しきい値。現状は広めに設定。
 constexpr uint32_t TMC_TCOOLTHRS_DEFAULT = 0xFFFFF;

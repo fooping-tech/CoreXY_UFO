@@ -148,7 +148,8 @@ bool HomingController::runHome(StepperBackendFastAccel& backend,
     return false;
   }
   machine.homed = machine.x_homed && machine.y_homed;
-  if (machine.homed && !moveToHomePark(backend, safety, machine)) {
+  if (machine.homed && HOMING_PARK_AFTER_HOME_ENABLED &&
+      !moveToHomePark(backend, safety, machine)) {
     machine.homed = false;
     machine.x_homed = false;
     machine.y_homed = false;
