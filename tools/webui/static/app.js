@@ -1,4 +1,4 @@
-const SOFT_LIMIT = { minX: 0, maxX: 60, minY: 0, maxY: 55 };
+const SOFT_LIMIT = { minX: 0, maxX: 500, minY: 0, maxY: 250 };
 const API_TIMEOUT_MS = 5000;
 const JOG_FEED_MM_MIN = 900;
 const PREVIEW_SIZE = { width: 960, height: 640, pad: 36 };

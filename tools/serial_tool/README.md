@@ -108,6 +108,7 @@ python tools/serial_tool/serial_send.py \
 |---|---|---|
 | [HW Test Check](docs/hwtest-check.md) | コントローラPCB単体検査(専用`m5stack-core2-hwtest` firmware) | `examples/hwtest_check.csv` |
 | [Bringup Check](docs/bringup-check.md) | Serial、基本設定、TMC、CoreXYログの初期確認 | `examples/bringup.csv` |
+| [Test Mode Check](docs/test-mode-check.md) | LCDテストモード(BtnB長押し)の方向・limit・TMC診断 | `examples/test_mode_check.csv` |
 | [Direction Check](docs/direction-check.md) | XY実機方向とA/Bモータ方向反転設定 | `examples/config_check.csv`, `examples/xy_direction_check.csv` |
 | [CoreXY Check](docs/corexy-check.md) | CoreXY変換ログと短いXY移動 | `examples/corexy_check.csv` |
 | [Limit Check](docs/limit-check.md) | X/Y limit switch入力のpin、極性、debounce確認 | `examples/limit_check.csv` |
@@ -124,6 +125,7 @@ python tools/serial_tool/serial_send.py \
 | [STS3020 Check](docs/sts3020-check.md) | Core2 UART1での半二重TTLサーボ通信・位置診断・安全な微動 | `examples/sts3020_check.csv` |
 | [Servo On/Off Check](docs/servo-on-off-check.md) | STS3020ペン上げ/下げサーボ角度と配線 | `examples/servo_check.csv` |
 | [LED Check](docs/led-check.md) | 現行STS3020構成では**無効**（GPIO33競合） | `examples/led_check.csv`（旧構成専用） |
+| [STS3020 Standalone Test Check](docs/sts3020-test-check.md) | STS3020単体の通信・微小JOG確認(専用`m5stack-core2-sts3020-test` firmware) | `examples/sts3020_test_check.csv` |
 | [Melody Check](docs/melody-check.md) | TMC UART、Aモータ、診断メロディprofile | `examples/melody_check.csv` |
 
 設定変更が必要な場合は、該当ドキュメントに従って`include/PlotterConfig.h`を編集し、再ビルド・再書き込みしてください。

@@ -1994,6 +1994,56 @@ KST32Bストロークフォントデータをホスト側で読み、日本語�
 - [ ] LIMIT_WATCHでX/Y各2 edge、bounce量を確認
 - [ ] 検査後に通常ファームウェアを書き戻し、通常`SELFTEST`を確認
 
+## 12.13 A/Bモータ入替設定 / Y homing方向調査
+
+実機homingでXは正方向、Yはswitchから離れる方向へ動いた。A/B入替を疑い`MOTOR_AB_SWAPPED`を追加したが、`true`で`TEST_A`が+X(switchから離れる)かつYがswitch側へ動いたため、配線入替ではないと判明。設定は残し`false`へ戻した。
+
+- [x] `PlotterConfig.h`に`MOTOR_AB_SWAPPED`を追加(配線差吸収用、現在`false`)
+- [x] `StepperBackendFastAccel`で論理A/Bと物理STEP/DIRピンの対応を入替可能にした
+- [x] `CONFIG`に`ab_swapped`/方向反転設定を表示
+- [x] `direction-check.md`の判定表に「Xは正しくYだけ逆」とhoming前`TEST_A/B`確認を追加
+- [x] 実機: `MOTOR_AB_SWAPPED=true`で`TEST_A`がYについてswitch側へ動くことを確認 → 入替不要
+- [x] 実機: `MOTOR_AB_SWAPPED=false`で`CONFIG`/`SELFTEST PASS`/`LIMIT_STATUS`(X/Y OFF)を確認
+- [x] 実機: `TEST_A`/`TEST_B`の方向と`HOME`完了を確認
+
+未解決リスク:
+
+- 初回のY homingがswitchから離れた原因は未特定(再現せず)。候補は(1)開始時Y limitがON判定されBackoff(最大`HOMING_START_BACKOFF_MM`=40mm)へ入った(新PCBのpull-up、配線接触)、(2)正常なBackoff動作の誤認。再発時は`HOME_Y started`行と`LIMIT_ON_AT_START`有無を記録する。
+
+## 12.14 キャンバスサイズ暫定変更 (X 500 / Y 250mm)
+
+作業範囲を`X 0-60 / Y 0-55mm`から暫定で`X 0-500 / Y 0-300mm`へ拡大後、Yを`0-250mm`へ変更した。
+
+- [x] `X_MAX_MM=500`、`Y_MAX_MM=250`(soft limit、UI jog clamp、`JOB_END`退避Y=245mmに連動)
+- [x] `HOMING_MAX_TRAVEL_X_MM=550`、`HOMING_MAX_TRAVEL_Y_MM=300`(作業範囲・実ストロークより大きくする)
+- [x] WebUI `SOFT_LIMIT`とtext tool呼び出しの`--max-x/--max-y`を500/250へ変更
+- [ ] 実機: ペン先が実際にX 500 / Y 250mmまで機構干渉なく動けるか確認
+- [ ] 実機: 遠端からの`HOME`完了(1200mm/minで最大約28s)を確認
+- [ ] 実機: 長距離`XY`で脱調がないことを確認
+
+未解決リスク:
+
+- 実機ストロークがX 500 / Y 250mm未満の場合、soft limit内でも枠に衝突する。確認後に実測値から余裕を引いた値へ再設定する。
+- 長距離移動での発熱・脱調、ベルト張力の影響は未確認。
+
+## 12.15 LCDテストモード
+
+画面UIからBtnB長押しで入るテストモードを通常ファームウェアへ追加した(方向・モータ単体、limit・TMC診断)。
+
+- [x] `DiagnosticsState`を追加し`StatusMessage.diagnostics`でCore 0へ渡す
+- [x] `SELFTEST`結果、`TMC_STATUS`時の`TMC_DIAG` A/B summary、単独モータテスト結果を記録
+- [x] UIからの`TEST_A`/`TEST_B`に低速feed(`TEST_MODE_MOTOR_FEED_MM_MIN`)を付与
+- [x] UiTaskにMOTOR/DIAGページ、BtnB長押しの入退場、job開始時の自動退出を追加
+- [x] UI `STOP`で`requestMotionAbort()`を呼ぶよう修正(従来はキュー投入のみで移動中に即停止しなかった)
+- [x] `test_mode_check.csv`と`test-mode-check.md`を追加
+- [x] `pio run -e m5stack-core2`、native motion tests
+- [ ] 実機: BtnB長押しで入退場、DIAG表示(limit/SELFTEST/TMC)、MOTOR方向、STOP中断を確認
+
+未解決リスク:
+
+- `m5stack-core2-sim` / `-hwtest` envは、`lib_deps`のFastLEDがバージョン未固定のため新規取得された3.10.7でコンパイルエラーになる(本変更とは無関係、通常envは3.10.6で成功)。`fastled/FastLED@3.10.6`への固定を検討する。
+- TMC DRV_STATUSのopen load(ola/olb)は静止中に誤検出しうるためUIでは表示しない。
+
 ---
 
 # 13. Codex用プロンプト
@@ -2380,3 +2430,77 @@ Codexは勝手に実装しないこと。
 - [ ] TMC2209共存、NeoPixel端子不駆動、XY/ジョブ/G-codeとHWTESTの回帰確認
 
 未解決リスク: ペン角度とサーボのゼロ点オフセット、機械接触を含む負荷条件、通信成功と実動作完了の差、サーボ指令失敗時に物理的なペンが下がっている可能性、外部電源とGNDのノイズ/過電流。実機試験までは完了扱いにしない。
+
+## 2026-10-17: STS3020単体テストファームウェア
+
+目的: Core2 + STS3020 1台の通信確認と微小動作確認を、CoreXYファームウェアと独立に行う。
+
+チェックリスト:
+
+- [x] `m5stack-core2-sts3020-test`環境追加(`src/sts3020test/`)
+- [x] 通常`m5stack-core2`環境から除外し、ビルド成功を確認
+- [x] HELP/PING/READ/STATUS/JOG/OFF実装、起動時無動作
+- [x] JOG安全条件(Ping、error flags、mode、位置読出し、範囲、角度制限)
+- [x] チェックCSV `sts3020_test_check.csv`、手順書 `sts3020-test-check.md`
+- [x] 実機書き込み、起動ログ、PING、READ、STATUS、OFF
+- [x] 実機JOG -100 / -30 / +30 で`Result: PASS`(2回目、8.0V電源)
+
+実機確認結果(2026-10-17、/dev/cu.usbserial-559B0208731):
+
+- 起動ログ: TX=GPIO32、RX=GPIO33、1Mbps、ID=1。`Servo detected: ID=1`。起動時の動作なし。
+- STATUS: Model=1289、Mode=0(position)、Torque=0、Position=0、Goal=0、角度制限0..4095、Voltage=12.0V、EEPROM Max voltage=10.0V / Min voltage=5.5V、Temperature=29C。
+- Servo error flags=0x01(VOLTAGE)。供給12.0VがEEPROM上限10.0Vを超えているため、JOG +30 / -30はいずれも`JOG ABORTED: servo reports error flags (no motion)`で拒否。モータは動かしていない。
+- OFF: `Torque disabled`応答あり。
+
+2回目(2026-10-17、電源を約8.0Vへ変更後):
+
+- STATUS: Voltage=7.9〜8.0V(EEPROM 5.5..10.0V内)、error flags=0x00、Mode=0、Temperature=27〜28C。
+- 位置4092で、0/4095折り返し点から4 counts。JOG目標範囲100..3995外のため±30は不可。出力軸は硬く手で回せなかった。
+- ユーザー承認のうえ、初回動作を±30ではなく`JOG -100`とした(折り返し点から離すため)。
+- `JOG -100`: 4092→目標3992→実測3995(+3、629ms)PASS。
+- `JOG -30`: 3993→目標3963→実測3964(+1、315ms)PASS。
+- `JOG +30`: 3964→目標3994→実測3992(-2、357ms)PASS。
+- `OFF`: Torque disabled。終了位置3992、goal 3994、error flags 0x00。
+
+Touch UI追加(2026-10-17):
+
+- [x] 画面ボタン(-100/-30/+30/+100/READ/OFF)とBtnA/B/C(-30/OFF/+30)を追加、Serial JOGと共通経路
+- [x] ビルド・書き込み、Serial起動ログ/PING/READ確認(位置3992)
+- [ ] 実機タッチ操作でのJOG PASS、REJECT表示、実行中タップ破棄の確認(ユーザー操作待ち)
+
+未解決リスク / 次の作業:
+
+- STS3020の定格電圧はデータシート未確認。EEPROM制限(5.5..10.0V)と既存ブランチの7.4V想定から、現在の約8.0Vで運用。12V電源は使用しない。EEPROM制限の書き換えでの回避はしない。
+- 停止位置が3992で、まだ折り返し点(4095/0)に近い。ペン用途で使う前に、機構取り付け位置と中央(約2048)付近の動作範囲を決める。
+- 静止摩擦/硬さで手回しできない状態。トルクOFF中の手回し前提の手順は使えない。
+- 連続実行時の温度、通信エラー頻度、負荷付き動作は未確認。
+- `m5stack-core2-hwtest`環境は、libdepsに入ったFastLED 3.10.7(未pin)がこのtoolchainでコンパイルエラー。今回の変更とは無関係だが、FastLEDのversion pinが必要。
+
+## 2026-10-18: STS3020 Z軸向け多回転試験・複数台ID
+
+Z軸構想: 紐とドラム、ストローク800mm、荷重400g。STS3020(7.4V、定格7.5kg·cm、無負荷67rpm)では、単一回転に収める直径約300mmドラムはトルク不足(定格比80%)。直径80〜100mm、2.5〜3.2回転の多回転位置制御を候補とする。
+
+チェックリスト:
+
+- [x] Touch UIの実機操作(位置3992→2139への移動を確認)
+- [x] MT_ON、MT_JOG ±1024 PASS(境界越え)
+- [x] MT_JOG +4096: サーボは逆回転せず1回転して停止。ただしPresent Positionが折り返すためTIMEOUT判定 → ファームウェア側で折り返し補正を追加
+- [x] MT_OFF→MT_ON後のMT_JOG +30で約1回転逆回転(内部多回転位置の保持が原因)→ MT_ONのgoal整合チェック、多回転中のJOG禁止を追加
+- [ ] MT_ONのgoal整合チェックが不一致時に拒否することの実機確認(未発動)
+- [ ] hold check / runaway guard が異常時にtorque OFFすることの実機確認(未発動)
+- [x] サーボ電源再投入で内部多回転位置がリセットされるか(再投入後goal 2168→0、その後のMT_ON/MT_JOGでhold check OK=内部位置はraw一致。1回の確認のみ)
+- [x] 電源投入直後はgoal=0のためMT_ONの整合チェックが常に不一致となる → goal=0かつtorque OFFを電源投入状態として許可し、初回MT_JOGのhold check(200ms、±10 counts)で検証する方式に変更
+- [x] hold check(全JOG/MT_JOG)とrunaway guard(逆方向または指令量超過50 counts)を追加。異常時は即torque OFF
+- [x] MT_ON中の電源再投入で角度制限が0/4095へ戻るか(EEPROM非保存の確認): 戻った。goalも0へリセット
+- [x] 2回目の電源再投入後もMT_ON → MT_JOG ±30でhold check OK、PASS(内部多回転位置リセットを2回確認)
+- [x] 折り返し補正付きMT_JOG ±4096、+12288(右3回転)/-12288のPASS(2026-10-18、ID 1、無負荷、800 counts/s、1A電源、7.9V維持。+30: 252ms、±4096: 約5.5s、±12288: 15.7s、誤差±2 counts以内、全hold check OK)
+- [x] 2台目(アーム)をID 2へ変更(SET_ID OK、SCAN/STATUSでID 2確認)
+- [x] ID 2が電源再投入後も保持されること(再接続後もID 2で応答)
+- [x] 2台直列でSCANがID 1/2を返し、bad replyがないこと(2回連続、両STATUSでerror flags 0x00、7.9〜8.0V)
+- [ ] 外部電源の電流容量: 現状1A(無負荷1台ずつは可)、3.5Aへ変更予定。2台同時ストール最大約4.8Aを下回るため、torque limit設定を検討
+
+未解決リスク:
+
+- 内部多回転位置がPresent Positionで読めないため、ESP32リセット時や追跡喪失時に絶対位置を復元できない。Z軸実装では起動時の上端リミットによる原点出しが必須。ステップモード(mode 3)の比較評価も検討する。
+- 多回転で意図しない回転が実測されたため、荷重付きZ軸での使用は上記確認が完了するまで禁止。
+- 電源断時に400gのアームが落下するか(ギア摩擦で保持できるか)は未確認。

@@ -978,9 +978,9 @@ class WebUIHandler(SimpleHTTPRequestHandler):
             "--dwell-ms",
             str(dwell_ms),
             "--max-x",
-            "60",
+            "500",
             "--max-y",
-            "55",
+            "250",
             "-o",
             str(temp_path),
         ]

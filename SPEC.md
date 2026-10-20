@@ -349,9 +349,9 @@ MotorMelodyController
 | `DEFAULT_ACCEL_MM_S2` | `100.0f` |
 | `DEFAULT_MOTOR_ACCEL_STEPS_S2` | `round(DEFAULT_ACCEL_MM_S2 * STEPS_PER_MM * COREXY_MAX_MOTOR_GAIN)` |
 | `X_MIN_MM` | `0.0f` |
-| `X_MAX_MM` | `55.0f` |
+| `X_MAX_MM` | `500.0f` |
 | `Y_MIN_MM` | `0.0f` |
-| `Y_MAX_MM` | `55.0f` |
+| `Y_MAX_MM` | `250.0f` |
 | `SERIAL_BAUD` | `115200` |
 | `TMC_UART_BAUD` | `115200` |
 | `DIR_CHANGE_DELAY_US` | `200` |
@@ -1174,6 +1174,40 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - `SELFTEST`はモータを回さない自動判定(limit安定性、TMC A/B UART/version/アドレスピン/ENN/GSTAT/DRV_STATUS、PIN_CHECK)で、最終行は`SELFTEST RESULT PASS|FAIL fails=N`。
 - 判定NGは`FAIL`/`WARN`接頭辞でログし、Serial Toolを止める`ERROR:`はコマンド書式エラーだけに使う。
 
+## 21.3 A/Bモータ入替設定 (`MOTOR_AB_SWAPPED`)
+
+配線差の吸収用設定。CoreXYでは論理A/Bを入れ替えると`x'=x, y'=-y`となるため、これはA/Bモータ配線の入替で説明できる。`MOTOR_A/B_DIRECTION_INVERTED`の片側反転ではX/Yが入れ替わり、両側反転ではXも逆になるため吸収できない。
+
+| 設定 | 意味 |
+|---|---|
+| `MOTOR_AB_SWAPPED=false` | 論理A(X+Y)を`MOTOR_A_STEP/DIR_PIN`、論理B(X-Y)を`MOTOR_B_STEP/DIR_PIN`へ出力(現在値) |
+| `MOTOR_AB_SWAPPED=true` | 論理AをMOTOR_B側ピン、論理BをMOTOR_A側ピンへ出力 |
+
+- 判定は`TEST_A`で行う。`TEST_A`がX/Yともswitchから離れる方向へ動けば`false`が正しい。
+- 入替は`StepperBackendFastAccel`内のピン選択だけで行う。CoreXY式、`Core2PinMap.h`のピン定義、TMC UARTアドレスは変更しない。
+- `MOTOR_A/B_DIRECTION_INVERTED`は入替後の論理A/Bに適用する。
+- `true`のとき、`TEST_A`/`MELODY`(論理A)は物理ドライバB(UARTアドレス1)側で動く。`TMC_STATUS`のA/Bは物理ドライバ表記のまま。
+- `CONFIG`は`MOTOR ab_swapped=<0|1> a_inverted=<0|1> b_inverted=<0|1>`を表示する。
+
+## 21.4 LCDテストモード
+
+通常ファームウェアのCore2 UIに、PC無しで方向・limit・TMCを確認する専用テストモードを持つ。手順は`tools/serial_tool/docs/test-mode-check.md`。
+
+| 項目 | 内容 |
+|---|---|
+| 入る/抜ける | BtnBを`TEST_MODE_HOLD_MS`(1500ms)長押し。抜けるのは再長押しまたは`EXIT`タブ |
+| 入場条件 | motion/homing/job実行中でないこと。job開始時は自動で抜ける |
+| MOTORページ | `A+/A-/B+/B-`単独モータ移動、`STEP`(80/400/1600 steps)、`STOP`、limit/HOME表示、最後の結果 |
+| DIAGページ | limit X/Yのdebounced/raw表示、`SELFTEST`、`TMC INIT`、`TMC STATUS`、TMC A/B診断パネル |
+
+追加仕様・制約:
+
+- UIはCore 0。テスト操作は既存`CommandType`(`TEST_A`/`TEST_B`/`SELFTEST`/`TMC_INIT`/`TMC_STATUS`/`ABORT`)を`CommandQueue`へ入れるだけで、モータ・TMCを直接触らない。
+- UIからの`TEST_A`/`TEST_B`は`feed_mm_min=TEST_MODE_MOTOR_FEED_MM_MIN`(600mm/min相当)を付け、`moveABSteps()`で片側0 stepとして実行する。Serialの`TEST_A`/`TEST_B`(feed無し)は従来通りbackendの現在速度で動く。単独モータ移動はHOMEDを解除する。
+- 診断結果はCore 1の`DiagnosticsState`(`selftest_result`、TMC A/B summary、`last_motor_test`)に保持し、`StatusMessage.diagnostics`でCore 0へ渡す。
+- `TMC_STATUS`は従来出力に加え`Diagnostics::runTmcDiagnostics()`で`TMC2209Manager::readDiagnostics()`を呼び、`TMC_DIAG A|B ... result=OK|NG`を出力する。OK条件はUART接続OK、version 0x21、DRV_STATUSのot/short無し、GSTAT drv_err無し。otpwとuv_cpは警告扱い。モーション中は実行しない。
+- UIの`STOP`(CTRLページ含む)はSerial `ABORT`と同じく`requestMotionAbort()`を先に呼んでから`ABORT`をキューへ入れる。
+
 ## 22. 受け入れ条件
 
 初期版は以下を満たすこと。
@@ -1212,3 +1246,31 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - 位置指令後はSTS3020内部エンコーダの位置を20ms間隔で読み、2秒以内に目標から35カウント以内へ到達した場合だけ成功扱い。タイムアウト/読み取り失敗はペン指令失敗とする。サーボ位置到達は外部ペン機構の干渉・破損がないことの保証ではない。
 - `m5stack-core2-hwtest` はSERVO_STATUS、SERVO、PENUP、PENDOWN、SERVO_SWEEPをSTS3020に対応させた。LED_TESTは無効。
 - 詳細は `tools/serial_tool/docs/sts3020-check.md` を参照する。
+
+## 2026-10-17: STS3020単体テストファームウェア
+
+- 専用PlatformIO環境`m5stack-core2-sts3020-test`を追加。ソースは`src/sts3020test/`のみで、CoreXY/TMC2209/NeoPixel/FreeRTOS UIタスクはリンクしない。通常の`m5stack-core2`環境は`-<sts3020test/>`で除外し、FTServoライブラリへの依存も持たない。
+- 使用資源: M5Unified(電源・LCD初期化と静的バナーのみ)、USB Serial 115200bps、UART1(HardwareSerial(1))1,000,000bps 8N1、TX=GPIO32 / RX=GPIO33(Core2 Port A)、サーボID=1。
+- 半二重TTL変換はバスサーボアダプタで行う。ESP32 TX/RXをサーボ信号線へ直結しない。サーボは外部電源給電、Core2とGND共通。
+- 起動時はUART初期化とPINGのみ。位置指令・トルク指令は送らない。
+- Serialコマンド: `HELP`、`PING`、`READ`、`STATUS`、`JOG <+/-n>`、`OFF`。
+- `JOG`安全条件: Ping成功、servo error flags=0、mode=0(position)、現在位置読出し成功、目標が100..3995かつサーボ角度制限内、|n|<=100。いずれか不成立なら動かさない。
+- `JOG`手順: goal=現在位置を書き込み → torque ON → 目標を速度200 counts/s・ACC 10で指令 → 20ms周期で読出し、±5 counts以内かつmoving=0で`PASS`、2秒以内に到達しなければ`TIMEOUT`(torqueは保持)。
+- `OFF`はtorque無効化のみで、非常停止の代わりではない。
+- 電源電圧はサーボEEPROMの入力電圧制限(addr 15 min / 14 max、0.1V単位)内であること。範囲外ではサーボがVOLTAGE flagを返し、JOGは拒否される。制限値の書き換えで回避しない。
+- Touch UI(2026-10-17追加): LCDに位置/Torque/Link/電圧/error flags/直前結果を1秒周期表示。画面ボタン`-100`/`-30`/`+30`/`+100`/`READ`/`OFF`、画面下BtnA/B/C=`-30`/`OFF`/`+30`。タッチもSerialの`JOG`と同じ検査付き経路を通る。1タップ1回で、実行中のタップは破棄する。Serialとタッチはともに`loop()`内で処理し、サーボバスへ同時アクセスしない。
+- 実機確認済み電源: 約8.0V(EEPROM制限5.5..10.0V内)。12VではVOLTAGE flagとなるため使用しない。
+- 現在位置が折り返し点付近でJOG±30が範囲外となる場合、手回しできないときは`JOG -100`/`JOG +100`で一度だけ範囲内へ移してから±30を行ってよい。
+- 手順書: `tools/serial_tool/docs/sts3020-test-check.md`
+
+## 2026-10-18: STS3020 複数台ID・多回転試験(単体テストファームウェア)
+
+- サーボID割り付け: ID 1 = Z軸(アーム上下、紐とドラム)、ID 2 = アーム。同一UART1バスに直列接続する。ID重複禁止。
+- 単体テストファームウェアに`SCAN`(ID 0..20)、`ID <n>`(操作対象切替、起動時1)、`SET_ID <n>`を追加。
+- `SET_ID`は、選択IDへのPING 10回連続成功、broadcast PINGが選択IDのみ、新IDに応答なし、の全条件で実行。torque OFF → EEPROM unlock → ID書込み → 新IDでPING → EEPROM lock。
+- 多回転試験`MT_ON`/`MT_JOG`/`MT_OFF`: 角度制限0/0で多回転位置制御。EEPROM lockのまま書き込むため保存されず、サーボ電源再投入で0/4095に戻る(実測)。`MT_ON`は角度制限が0/4095、EEPROM lock=1、かつ「goalレジスタ=現在位置(±5)」または「goal=0かつtorque OFF(電源投入状態)」の場合のみ許可。`MT_JOG`は1回最大3回転(12288 counts)、|目標|<=28000、800 counts/s。
+- 実測: サーボ電源再投入でgoalは0、内部多回転位置はPresent Positionと一致(2回確認)。
+- 全JOG/MT_JOG/タッチJOGに安全機構: hold check(現在位置hold + torque ON後200msで±10 counts超動けば即torque OFF)、runaway guard(逆方向50 counts超または指令量+50 counts超で即torque OFF)。
+- 実測(無負荷、ID 1、1A電源): MT_JOG +12288(右3回転)/-12288 PASS、15.7s、誤差±2 counts以内、7.9V維持。
+- 実測: 多回転時、goalは多回転値として効くが、Present Positionは1回転ごとに0..4095で折り返す。ファームウェアは20ms周期の読出しで折り返しを補正して絶対位置を追跡する。読出し欠落500ms超、多回転中のOFF、ID切替で追跡を無効化する。
+- 実測: サーボ内部の多回転位置はMT_OFF→MT_ONで保持され、Present Positionからは読めない。現在位置ベースのgoal書込みで1回転分の意図しない回転が発生した。このため多回転中は通常`JOG`/タッチJOGを拒否する。

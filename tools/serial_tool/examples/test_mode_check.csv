@@ -1,0 +1,9 @@
+command,delay_ms,expect,comment
+CONFIG,500,BOARD,Confirm firmware build and limits before entering LCD TEST MODE
+SELFTEST,500,SELFTEST PASS,Same result must appear as SELFTEST PASS on TEST DIAG page
+TMC_INIT,1000,TMC_INIT,Initialize TMC2209 so TEST DIAG shows TMC profile READY
+TMC_STATUS,1500,TMC_DIAG B,Low-frequency TMC diagnostics; TMC_DIAG A/B must show result=OK and match TEST DIAG panels
+LIMIT_STATUS,500,LIMIT_STATUS,Compare with LIMIT X/Y indicators on TEST DIAG page
+TEST_A 400,3000,TEST_A,Serial TEST_A keeps current backend speed; expect +X+Y diagonal (away from both switches)
+TEST_B 400,3000,TEST_B,Expect +X-Y diagonal (X away from switch and Y toward switch)
+POS,500,POS,Motor tests clear HOMED; re-run HOME before drawing

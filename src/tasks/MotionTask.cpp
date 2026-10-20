@@ -74,7 +74,8 @@ StatusMessage currentStatus() {
   return StatusMessage{machine_state, safety_manager.xLimitActive(),
                        safety_manager.yLimitActive(),
                        safety_manager.xLimitRawActive(),
-                       safety_manager.yLimitRawActive()};
+                       safety_manager.yLimitRawActive(),
+                       diagnostics_state};
 }
 
 void invalidateHomed(const char* reason) {
@@ -842,23 +843,42 @@ void handleABTimed(const CommandMessage& command) {
              command.a_steps, command.b_steps, command.duration_us);
 }
 
-void handleSingleMotor(bool motor_a, int32_t steps) {
+void recordMotorTestResult(bool motor_a, int32_t steps, const char* result) {
+  snprintf(diagnostics_state.last_motor_test,
+           sizeof(diagnostics_state.last_motor_test), "TEST_%c %+ld %s",
+           motor_a ? 'A' : 'B', static_cast<long>(steps), result);
+  publishStatus();
+}
+
+// feed_mm_min > 0: 指定feed相当の速度で単独モータを動かす(UIテストモード用)。
+// feed_mm_min <= 0: 従来通りbackendの現在速度設定で動かす(Serial TEST_A/TEST_B)。
+void handleSingleMotor(bool motor_a, int32_t steps, float feed_mm_min) {
   invalidateHomed("independent motor test");
 #if SIMULATION_MODE
   logMessage("SIMULATION_MODE: TEST_%c steps=%ld no motor output",
              motor_a ? 'A' : 'B', steps);
+  recordMotorTestResult(motor_a, steps, "SIM");
 #else
-  const bool accepted = motor_a ? stepper_backend.moveASteps(steps)
-                                : stepper_backend.moveBSteps(steps);
+  bool accepted = false;
+  if (feed_mm_min > 0.0f) {
+    accepted = stepper_backend.moveABSteps(motor_a ? steps : 0,
+                                           motor_a ? 0 : steps, feed_mm_min);
+  } else {
+    accepted = motor_a ? stepper_backend.moveASteps(steps)
+                       : stepper_backend.moveBSteps(steps);
+  }
   if (!accepted) {
     logMessage("ERROR: backend rejected TEST_%c", motor_a ? 'A' : 'B');
+    recordMotorTestResult(motor_a, steps, "REJECT");
     return;
   }
   setMotionActive(true);
-  if (!waitForMotionOrLimit()) {
+  const bool completed = waitForMotionOrLimit();
+  if (!completed) {
     logMessage("ERROR: TEST_%c stopped", motor_a ? 'A' : 'B');
   }
   setMotionActive(false);
+  recordMotorTestResult(motor_a, steps, completed ? "DONE" : "STOPPED");
 #endif
 }
 }
@@ -898,10 +918,10 @@ void motionTask(void*) {
         logMessage("ZERO logical origin reset; this is not homing");
         break;
       case CommandType::TEST_A:
-        handleSingleMotor(true, command.steps);
+        handleSingleMotor(true, command.steps, command.feed_mm_min);
         break;
       case CommandType::TEST_B:
-        handleSingleMotor(false, command.steps);
+        handleSingleMotor(false, command.steps, command.feed_mm_min);
         break;
       case CommandType::AB_TIMED:
         if (ensureTmcReadyForMotion("AB_TIMED")) {
@@ -974,6 +994,7 @@ void motionTask(void*) {
         break;
       case CommandType::TMC_STATUS:
         tmc_manager.printStatus();
+        Diagnostics::runTmcDiagnostics();
         break;
       case CommandType::HOME:
         if (ensureTmcReadyForMotion("HOME")) {

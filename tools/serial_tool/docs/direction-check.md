@@ -6,6 +6,7 @@ Python側やCSV側でモータ方向を設定しません。方向反転はフ�
 ```cpp
 constexpr bool MOTOR_A_DIRECTION_INVERTED = false;
 constexpr bool MOTOR_B_DIRECTION_INVERTED = false;
+constexpr bool MOTOR_AB_SWAPPED = false;
 ```
 
 ## CSV
@@ -39,6 +40,17 @@ python tools/serial_tool/serial_send.py \
   --echo
 ```
 
+## Before Homing
+
+`XY`はhoming完了前は拒否されるため、homing前の方向確認は単独モータで行います。
+
+| Command | Expected motion |
+|---|---|
+| `TEST_A 400` | +X+Y対角へ約3.5mm(原点switchから離れる) |
+| `TEST_B 400` | +X-Y対角へ約3.5mm |
+
+`TEST_A`が+X-Y、`TEST_B`が+X+Yへ動く場合はA/Bが入れ替わっています。
+
 ## Expected Motion
 
 | Command | Expected motion | Firmware log check |
@@ -49,7 +61,7 @@ python tools/serial_tool/serial_send.py \
 
 ## How To Adjust
 
-観察結果に応じて、`include/PlotterConfig.h`の`MOTOR_A_DIRECTION_INVERTED`または`MOTOR_B_DIRECTION_INVERTED`を変更し、ファームウェアを再ビルド・再書き込みしてください。
+観察結果に応じて、`include/PlotterConfig.h`の`MOTOR_A_DIRECTION_INVERTED`、`MOTOR_B_DIRECTION_INVERTED`、または`MOTOR_AB_SWAPPED`を変更し、ファームウェアを再ビルド・再書き込みしてください。
 
 ```bash
 pio run
@@ -61,6 +73,7 @@ pio run --target upload
 | +X命令で-Xへ動く、+Y命令で-Yへ動く | AとBの両方を反転する |
 | +X命令が主にY方向へ動き、+Y命令が主にX方向へ動く | A/Bモータの配線またはSTEP/DIR割り当てを入れ替えていないか確認する |
 | +X命令で斜めに流れる | A/Bの片方だけ方向が反転している可能性が高い |
+| +X命令は正しいが、+Y命令で-Yへ動く(homing Yがswitchから離れる) | A/Bモータが入れ替わっている。`MOTOR_AB_SWAPPED`を反転する(片側の`DIRECTION_INVERTED`では直らない) |
 | 片方のモータだけ動かない、異音がする | CSVを止め、TMC配線、電源、コイルペア、`TMC_STATUS`を確認する |
 
 方向が合ったら、同じCSVをもう一度実行し、3つの移動が期待方向になることを確認してください。

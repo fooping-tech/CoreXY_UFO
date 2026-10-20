@@ -110,10 +110,11 @@ constexpr uint32_t AB_TIMED_MIN_DURATION_US = 1000;
 
 // soft limit [mm]。homing後の通常XY移動をこの範囲に制限する。
 // 決め方: 実際にペン先が安全に動ける作業範囲から少し余裕を引いた値。
+// 2026-10-11: 暫定でX 500 / Y 250mm。実機ストローク未確認。
 constexpr float X_MIN_MM = 0.0f;
-constexpr float X_MAX_MM = 60.0f;
+constexpr float X_MAX_MM = 500.0f;
 constexpr float Y_MIN_MM = 0.0f;
-constexpr float Y_MAX_MM = 55.0f;
+constexpr float Y_MAX_MM = 250.0f;
 
 // JOB_END時の退避位置 [mm]。
 // 描画物からペンを離し、次ジョブの準備状態を見やすくする。
@@ -171,6 +172,14 @@ constexpr uint8_t PEN_DOWN_ANGLE_DEG = 80;
 constexpr bool MOTOR_A_DIRECTION_INVERTED = false;
 constexpr bool MOTOR_B_DIRECTION_INVERTED = false;
 
+// 論理A/Bモータと物理STEP/DIRピン(=ドライバ)の対応を入れ替える。
+// true: 論理A(X+Y)をMOTOR_B_STEP/DIR_PINへ、論理B(X-Y)をMOTOR_A_STEP/DIR_PINへ出力する。
+// 決め方: +X命令は正しいが+Y命令で-Yへ動く(=homing Yがswitchから離れる)場合、
+// A/Bモータの配線が入れ替わっている。片側だけのDIRECTION_INVERTEDでは直らない
+// (片側反転はX/Yが入れ替わり、両側反転はXも逆になる)ため、この設定で吸収する。
+// MOTOR_A/B_DIRECTION_INVERTEDは入れ替え後の論理A/Bに対して適用される。
+constexpr bool MOTOR_AB_SWAPPED = false;
+
 // ============================================================================
 // Homing / limit switches
 // ============================================================================
@@ -201,8 +210,8 @@ constexpr float HOMING_START_BACKOFF_MM = 40.0f;
 
 // homingで探索を許す最大移動距離 [mm]。
 // 決め方: 実ストロークより大きく、異常時に無限移動しない値にする。
-constexpr float HOMING_MAX_TRAVEL_X_MM = 100.0f;
-constexpr float HOMING_MAX_TRAVEL_Y_MM = 100.0f;
+constexpr float HOMING_MAX_TRAVEL_X_MM = 550.0f;
+constexpr float HOMING_MAX_TRAVEL_Y_MM = 300.0f;
 
 // homing完了時にMachineStateへ設定する座標 [mm]。
 // 原点switchを作業座標0にするなら0。
@@ -232,6 +241,31 @@ constexpr bool HOMING_REQUIRE_HOMED_FOR_XY_MOVE = true;
 // true: GPIO LOWでON。外付けpull-up + switchでGNDへ落とす配線。
 // false: GPIO HIGHでON。
 constexpr bool LIMIT_ACTIVE_LOW = true;
+
+// ============================================================================
+// LCD test mode
+// ============================================================================
+// Core2下部の中央ボタン(BtnB)をこの時間押し続けるとテストモードへ入る/抜ける [ms]。
+// 決め方: 通常操作で誤って入らない長さ。
+constexpr uint32_t TEST_MODE_HOLD_MS = 1500;
+
+// テストモードの単独モータ移動速度 [mm/min相当]。
+// 単独モータ移動はXYで1/sqrt(2)倍の対角移動になる。方向を目視しやすい低速にする。
+// 例: 600mm/min = 800 steps/s。
+constexpr float TEST_MODE_MOTOR_FEED_MM_MIN = 600.0f;
+
+// テストモードで選べる単独モータ移動量 [steps]。STEPボタンで順に切り替える。
+// 80 steps = モータ1mm(XY対角約0.7mm)、400 = 5mm、1600 = 20mm。
+constexpr int32_t TEST_MODE_MOTOR_STEP_OPTIONS[] = {80, 400, 1600};
+constexpr uint8_t TEST_MODE_MOTOR_STEP_DEFAULT_INDEX = 1;
+
+static_assert(TEST_MODE_MOTOR_FEED_MM_MIN > 0.0f &&
+                  TEST_MODE_MOTOR_FEED_MM_MIN <= MAX_FEED_MM_MIN,
+              "TEST_MODE_MOTOR_FEED_MM_MIN must be in (0, MAX_FEED_MM_MIN]");
+static_assert(TEST_MODE_MOTOR_STEP_DEFAULT_INDEX <
+                  sizeof(TEST_MODE_MOTOR_STEP_OPTIONS) /
+                      sizeof(TEST_MODE_MOTOR_STEP_OPTIONS[0]),
+              "TEST_MODE_MOTOR_STEP_DEFAULT_INDEX out of range");
 
 // ============================================================================
 // NeoPixel status LEDs

@@ -10,6 +10,7 @@ QueueHandle_t status_queue = nullptr;
 QueueHandle_t log_queue = nullptr;
 QueueHandle_t led_command_queue = nullptr;
 MachineState machine_state;
+DiagnosticsState diagnostics_state;
 SafetyManager safety_manager;
 StepperBackendFastAccel stepper_backend;
 TMC2209Manager tmc_manager(Serial2);
@@ -43,7 +44,8 @@ void publishStatus() {
   StatusMessage status{machine_state, safety_manager.xLimitActive(),
                        safety_manager.yLimitActive(),
                        safety_manager.xLimitRawActive(),
-                       safety_manager.yLimitRawActive()};
+                       safety_manager.yLimitRawActive(),
+                       diagnostics_state};
   xQueueOverwrite(status_queue, &status);
 }
 

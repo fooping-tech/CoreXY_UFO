@@ -18,6 +18,7 @@ extern QueueHandle_t status_queue;
 extern QueueHandle_t log_queue;
 extern QueueHandle_t led_command_queue;
 extern MachineState machine_state;
+extern DiagnosticsState diagnostics_state;
 extern SafetyManager safety_manager;
 extern StepperBackendFastAccel stepper_backend;
 extern TMC2209Manager tmc_manager;
