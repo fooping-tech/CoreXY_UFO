@@ -1,0 +1,10 @@
+command,delay_ms,expect,comment
+HELP,500,Commands:,List STS3020 test commands
+PING,700,Servo detected: ID=1,Communication check only (no motion)
+READ,700,Position:,Read raw position 0..4095
+STATUS,1500,Mode        : 0 (position),Confirm position mode and voltage/temperature
+JOG +30,3000,Result: PASS,Small +30 count move (~2.6 deg); aborts on any failed check
+READ,700,Position:,Confirm position after JOG +30
+JOG -30,3000,Result: PASS,Return -30 counts
+READ,700,Position:,Confirm position after JOG -30
+OFF,700,Torque disabled,Disable torque (not an emergency stop)

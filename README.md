@@ -66,6 +66,48 @@ readyの場合だけ明示実行します。終了または中断時には通常
 KST32BストロークフォントデータからG-codeを生成します。InkscapeやHershey Textには
 依存しません。詳細は[tools/text_tool/README.md](tools/text_tool/README.md)を参照してください。
 
+## STS3020 servo ID setup
+
+FEETECH STS3020を同じシリアルバスに直列接続する場合、各サーボのIDを重複させないでください。
+新品は通常ID=1で出荷されるため、2台目以降は接続前にIDを変更します。
+IDが重複すると、同じ指令に複数台が同時に応答して通信が壊れます
+(PINGの不規則な失敗、`reply from unexpected ID`、SCANで何も見つからない等)。
+
+ID割り付け:
+
+| ID | 用途 |
+|---:|---|
+| 1 | Z軸(アーム上下、紐とドラム) |
+| 2 | アーム |
+
+ID設定には単体テストファームウェア`m5stack-core2-sts3020-test`を使います。
+コマンドはUSB Serial(115200bps)から入力します。
+
+```bash
+pio run -e m5stack-core2-sts3020-test -t upload
+pio device monitor -b 115200
+```
+
+手順:
+
+1. **IDを変更するサーボ1台だけ**をバスに接続し、外部サーボ電源を入れる
+2. `SCAN`で、そのサーボだけが応答することを確認する(例: `ID=1: found`、`1 servo(s) found`)
+3. 必要なら`ID <現在のID>`で操作対象を選ぶ(起動時はID=1)
+4. `SET_ID <新しいID>`を実行し、`SET_ID OK: servo now answers ID=<新しいID>`を確認する
+5. `SCAN`と`STATUS`で新しいIDで応答することを確認する
+6. 全サーボを直列に戻し、`SCAN`で全IDが応答し、`bad reply`がないことを確認する
+
+`SET_ID`の安全条件:
+
+- 選択中IDへのPINGが10回連続で成功し、broadcast PINGがそのIDだけを返すこと
+  (複数台接続中は拒否される)
+- 新しいIDに応答する機器がいないこと
+- 書込み前にtorqueをOFFにし、EEPROMを一時的にunlockしてIDを書き、その後lockする
+
+IDはサーボのEEPROMに保存され、電源を切っても保持されます。
+テストファームウェアは起動時にID=1を選択するので、他のサーボを操作するときは`ID <n>`で切り替えます。
+詳細は[tools/serial_tool/docs/sts3020-test-check.md](tools/serial_tool/docs/sts3020-test-check.md)を参照してください。
+
 ## Known limitations
 
 - TMC2209のMS1/MS2またはジャンパで、A/Bアドレスをそれぞれ`0`と`1`に設定する必要があります。
