@@ -79,6 +79,10 @@ class UpdateTestStateTest(unittest.TestCase):
         server.update_test_state_from_log(line)
         self.assertEqual(server.snapshot_state()["lastTestResult"], line)
 
+    def test_alarm_clear_is_recorded(self):
+        server.update_test_state_from_log("ALARM_CLEAR complete")
+        self.assertEqual(server.snapshot_state()["lastTestResult"], "ALARM_CLEAR complete")
+
     def test_servo_status_and_result(self):
         server.update_test_state_from_log(
             "SERVO_STATUS id=1 result=OK flags=0x00 mode=0 torque=1 raw=99 goal=100 "

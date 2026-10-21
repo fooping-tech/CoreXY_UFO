@@ -2517,7 +2517,12 @@ Z軸構想: 紐とドラム、ストローク800mm、荷重400g。STS3020(7.4V�
 - [x] sim版実機(Core2)でWebUI API経由の一連確認: テストモードOFF時の拒否、TEST_JOG DONE、50mm超拒否、TEST_A/B DONE、SERVO_TURN 3 / SERVO_ANGLE PASS(sim)、STOP→ALARM→ALARM_CLEAR、TEST_MODE OFF
 - [x] 通常版実機: 起動ログ(ID1/ID2 ping)、SELFTEST PASS、PENUP ERROR、TEST_MODE ON/OFF、POS定期取得(LIMIT/RAW/TEST_MODE)、サーボ無応答時のSERVO_STATUS NO_REPLY / SERVO_TURN・SERVO_ANGLE REJECTED
 - [x] Testタブの表示をヘッドレスChromeで確認
-- [ ] サーボ電源投入後: SERVO_STATUS、SERVO_TURN ±1/4・±3、SERVO_ANGLE、STOP中断(hold停止)を実機確認
+- [x] サーボ電源投入後: SERVO_STATUS、SERVO_TURN ±1/4・±3、SERVO_ANGLE、STOP中断(hold停止)を実機確認(2026-10-21、WebUI API経由、無負荷、7.6V)
+  - ID1: 電源投入状態(goal=0、torque OFF)から追跡開始。+1/4 PASS(1.7s、+1)、-1/4 PASS、ANGLE 180 PASS(最短経路、2.9s)、+3回転 PASS(15.7s、-2)、-3回転 PASS(15.7s、+2)
+  - ID2: +1/4 PASS(-2)、-1/4 PASS(0)、ANGLE 180 PASS(0)
+  - STOP: SERVO_TURN 1 1の2s後にSTOP → `result=ABORTED ... hold=YES`、abs=3707で保持(torque=1、goal=3707)、ALARM(abort requested)。ALARM_CLEAR後の+1/4 PASS(追跡継続)
+  - 全hold check OK、error flags 0x00、25C
+- [x] WebUI表示: ALARM_CLEARの結果が`lastTestResult`に反映されない → `ALARM_CLEAR complete`を結果行パターンへ追加
 - [ ] ステッピングモータ接続状態でTEST_JOG ±X/±Y、TEST_A/B、STOPPED_LIMIT、リミット方向REJECTEDを実機確認
 - [ ] ブラウザ実操作(タッチ/クリック)での確認
 
@@ -2538,7 +2543,7 @@ Z軸構想: 紐とドラム、ストローク800mm、荷重400g。STS3020(7.4V�
 - [x] main/sim/hwtestビルドSUCCESS
 - [x] 実機: 起動ログ`TMC_INIT ... A connection=0 B connection=0 ready=YES`、TMC_STATUSでA/Bとも1/16・1104mA、(削除前の)待機中チェックでIFCNT不変(23→23、約8秒)
 - [ ] VMを切って入れ直し、`TMC reset detected ... re-applied`とHOMED解除、TMC_STATUSで1/16に戻ることを確認
-- [ ] 実機HOMEで原点(0,0)終了・Y+退避なし、終了後にlimit ON状態でalarmにならないことを確認
+- [x] 実機HOMEで原点終了・Y+退避なし(2026-10-21、ユーザー実機確認「ホーミングはうまくいった」)
 - [ ] TEST_A/TEST_Bを再起動直後に実行し、1/16設定で期待距離を動くことを確認
 
 未解決リスク:
