@@ -7,6 +7,7 @@
 #include "CoreXYKinematics.h"
 #include "Diagnostics.h"
 #include "GcodeInterpreter.h"
+#include "JoystickMapping.h"
 #include "JunctionPlanner.h"
 #include "PlotterConfig.h"
 #include "PlannerQueue.h"
@@ -1068,6 +1069,200 @@ void handleServoMove(const CommandMessage& command) {
   logMessage("%s id=%u value=%.2f result=%s %s", name, command.servo_id,
              command.servo_value, stsMoveResultName(result), detail);
 }
+
+// ---------------------------------------------------------------------------
+// Atom JoyStick jog session (test mode only)
+// ---------------------------------------------------------------------------
+// JogRequests arrive through the 1-deep JogQueue from joystickTask (Core 0).
+// XY runs in backend velocity mode; servos ID1 (Z) / ID2 (arm) use the
+// StsServoBus jog. Any Serial command ends the session so the PC stays in
+// charge.
+
+bool peekJogRequest(JogRequest& request) {
+  return jog_queue != nullptr && xQueuePeek(jog_queue, &request, 0) == pdTRUE;
+}
+
+bool jogRequestFresh(const JogRequest& request) {
+  return request.link && millis() - request.time_ms <= JOY_LINK_TIMEOUT_MS;
+}
+
+void setJoystickEvent(const char* format, const char* reason) {
+  snprintf(machine_state.joystick_last_event, sizeof(machine_state.joystick_last_event),
+           format, reason);
+}
+
+void runJogSession(const JogRequest& first) {
+  constexpr uint8_t SERVO_IDS[2] = {1, 2};
+  const uint32_t accel_steps_s2 = static_cast<uint32_t>(
+      JOY_ACCEL_MM_S2 * STEPS_PER_MM * COREXY_MAX_MOTOR_GAIN + 0.5f);
+  bool xy_ready = false;
+  bool xy_failed = false;
+  bool servo_begun[2] = {false, false};
+  bool servo_failed[2] = {false, false};
+  bool moving_toward_x = false;
+  bool moving_toward_y = false;
+  bool x_was_active = safety_manager.xLimitActive() || safety_manager.xLimitRawActive();
+  bool y_was_active = safety_manager.yLimitActive() || safety_manager.yLimitRawActive();
+  const char* reason = "idle";
+  uint32_t zero_since_ms = 0;
+  JogRequest request = first;
+  const MotionSyncReference reference = captureMotionSyncReference();
+
+  machine_state.joystick_jog_active = true;
+  setMotionActive(true);
+  logMessage("JOY_JOG start vx=%.1f vy=%.1f z=%ld arm=%ld", first.vx_mm_s, first.vy_mm_s,
+             static_cast<long>(first.z_counts_s), static_cast<long>(first.arm_counts_s));
+
+  for (;;) {
+    if (stopForAbort("JOY_JOG stopped")) {
+      reason = "abort";
+      break;
+    }
+    if (has_pending_command || !commandQueueEmpty()) {
+      reason = "serial_command";
+      break;
+    }
+    if (!machine_state.test_mode_active) {
+      reason = "test_mode_off";
+      break;
+    }
+    peekJogRequest(request);
+    if (!jogRequestFresh(request)) {
+      reason = "link_lost";
+      break;
+    }
+
+    // XY
+    safety_manager.poll();
+    machine_state.alarmed = safety_manager.isAlarmed();
+    if (machine_state.alarmed) {
+      stepper_backend.stop();
+      reason = "alarm";
+      break;
+    }
+    const bool x_active = safety_manager.xLimitActive() || safety_manager.xLimitRawActive();
+    const bool y_active = safety_manager.yLimitActive() || safety_manager.yLimitRawActive();
+    if ((x_active && !x_was_active && moving_toward_x) ||
+        (y_active && !y_was_active && moving_toward_y)) {
+      stepper_backend.stop();
+      reason = x_active && !x_was_active ? "limit_x" : "limit_y";
+      break;
+    }
+    x_was_active = x_active;
+    y_was_active = y_active;
+    float vx_mm_s = request.vx_mm_s;
+    float vy_mm_s = request.vy_mm_s;
+    joyMaskTowardLimits(vx_mm_s, vy_mm_s, x_active, y_active, HOMING_X_DIR, HOMING_Y_DIR);
+    const bool xy_requested = vx_mm_s != 0.0f || vy_mm_s != 0.0f;
+    if (xy_requested && !xy_ready && !xy_failed) {
+      xy_failed = !ensureTmcReadyForMotion("JOY_JOG");
+      if (!xy_failed) {
+        invalidateHomed("joystick jog without homing");
+        xy_ready = true;
+      }
+    }
+    if (xy_ready && xy_requested) {
+      // xyDeltaToABSteps of a 1 s delta = A/B step rates.
+      const CoreXYDelta rate =
+          CoreXYKinematics::xyDeltaToABSteps(vx_mm_s, vy_mm_s, STEPS_PER_MM);
+      stepper_backend.setVelocityAB(rate.a_steps, rate.b_steps, accel_steps_s2);
+      moving_toward_x = vx_mm_s * static_cast<float>(HOMING_X_DIR) > 0.0f;
+      moving_toward_y = vy_mm_s * static_cast<float>(HOMING_Y_DIR) > 0.0f;
+    } else if (xy_ready) {
+      stepper_backend.stopVelocity();
+    }
+    updateMachinePositionEstimateFromBackend(reference);
+
+    // Servos. beginJog() holds for the 200 ms hold check, during which limits
+    // are not polled, so only start a servo while XY is stopped.
+    const int32_t servo_rates[2] = {request.z_counts_s, request.arm_counts_s};
+    for (int i = 0; i < 2; ++i) {
+      if (servo_failed[i]) continue;
+      char detail[96] = "";
+      if (!servo_begun[i]) {
+        if (servo_rates[i] == 0 || stepper_backend.isRunning()) continue;
+        if (!sts_servo_bus.beginJog(SERVO_IDS[i], detail, sizeof(detail))) {
+          servo_failed[i] = true;
+          logMessage("JOY_JOG servo id=%u disabled %s", SERVO_IDS[i], detail);
+          continue;
+        }
+        servo_begun[i] = true;
+      }
+      if (!sts_servo_bus.updateJog(SERVO_IDS[i], servo_rates[i], detail, sizeof(detail))) {
+        servo_failed[i] = true;
+        logMessage("JOY_JOG servo id=%u stopped %s", SERVO_IDS[i], detail);
+      }
+    }
+
+    if (jogRequestIsZero(request) && !stepper_backend.isRunning()) {
+      if (zero_since_ms == 0) zero_since_ms = millis();
+      if (millis() - zero_since_ms >= JOY_SESSION_IDLE_EXIT_MS) {
+        reason = "idle";
+        break;
+      }
+    } else {
+      zero_since_ms = 0;
+    }
+    vTaskDelay(pdMS_TO_TICKS(JOY_SESSION_PERIOD_MS));
+  }
+
+  // Decelerate XY, still stopping at once on a new limit hit.
+  stepper_backend.stopVelocity();
+  while (stepper_backend.isRunning()) {
+    safety_manager.poll();
+    const bool x_active = safety_manager.xLimitActive() || safety_manager.xLimitRawActive();
+    const bool y_active = safety_manager.yLimitActive() || safety_manager.yLimitRawActive();
+    if ((x_active && !x_was_active && moving_toward_x) ||
+        (y_active && !y_was_active && moving_toward_y) || isMotionAbortRequested()) {
+      stepper_backend.stop();
+    }
+    updateMachinePositionEstimateFromBackend(reference);
+    vTaskDelay(pdMS_TO_TICKS(1));
+  }
+  updateMachinePositionEstimateFromBackend(reference);
+  stepper_backend.configureDefaultSpeed();
+  for (int i = 0; i < 2; ++i) {
+    if (servo_begun[i]) sts_servo_bus.endJog(SERVO_IDS[i]);
+  }
+  setMotionActive(false);
+  machine_state.joystick_jog_active = false;
+  setJoystickEvent("JOG end %s", reason);
+  logMessage("JOY_JOG end reason=%s X=%.3f Y=%.3f%s", reason, machine_state.x_mm,
+             machine_state.y_mm, xy_failed ? " xy=tmc_not_ready" : "");
+  publishStatus();
+}
+
+// Called while motionTask waits for commands.
+void pollJoystick() {
+  JogRequest request;
+  if (!peekJogRequest(request)) return;
+  const bool linked = jogRequestFresh(request);
+  if (linked != machine_state.joystick_link) {
+    machine_state.joystick_link = linked;
+    publishStatus();
+  }
+  static bool ignored_logged = false;
+  if (!linked || jogRequestIsZero(request)) {
+    ignored_logged = false;
+    return;
+  }
+  const char* blocked = nullptr;
+  if (!machine_state.test_mode_active) blocked = "test_mode_off";
+  else if (safety_manager.isAlarmed()) blocked = "alarm";
+  else if (job_controller.isActive() || job_controller.isRunning()) blocked = "job_active";
+  else if (machine_state.homing_active) blocked = "homing";
+  if (blocked != nullptr) {
+    if (!ignored_logged) {
+      logMessage("JOY_JOG ignored reason=%s", blocked);
+      setJoystickEvent("ignored %s", blocked);
+      publishStatus();
+      ignored_logged = true;
+    }
+    return;
+  }
+  ignored_logged = false;
+  runJogSession(request);
+}
 }
 
 void motionTask(void*) {
@@ -1087,7 +1282,12 @@ void motionTask(void*) {
   publishStatus();
   CommandMessage command;
   for (;;) {
-    if (!receiveNextCommand(command, portMAX_DELAY)) continue;
+    const TickType_t wait = JOYSTICK_ENABLED ? pdMS_TO_TICKS(JOY_SESSION_PERIOD_MS)
+                                             : portMAX_DELAY;
+    if (!receiveNextCommand(command, wait)) {
+      if (JOYSTICK_ENABLED) pollJoystick();
+      continue;
+    }
     syncJobActiveFlag();
     if (rejectDisallowedJobCommand(command)) {
       publishStatus();

@@ -2550,3 +2550,35 @@ Z軸構想: 紐とドラム、ストローク800mm、荷重400g。STS3020(7.4V�
 
 - 周期チェックがないため、VMを切っても次の移動コマンドまで検出されない(`POS`のTMC=READYは移動前まで古い値のまま)。長時間ジョブ中はG-code間の移動直前(ステッパ停止時)のみチェックされる。
 - HOME終了位置はリミットON付近(原点)。次の移動はリミット解放方向のみ許可される既存仕様のまま。
+
+## 2026-10-21: WebUI ジョグ後に「Motion in progress」のまま固まる不具合
+
+- 原因: Controlタブのジョグ(`XY x y 900`)はserial_sendが`ACK QUEUED`で終了し、直後の`XY batch=`でmotion=True、移動完了の`ACK_XY`はプロセス終了後に届くため取りこぼし、motion=Trueのまま残っていた(以前からの問題)。
+- [x] `XY`コマンドはCSVのexpectを`_XY target=`(ACK_XY/NACK_XY)にして完了行まで待つ
+- [x] Console/ジョグのコマンド終了後もmotion=Trueなら、POSを1回取得して状態を同期(motionTaskは移動後にPOSへ応答するためMOTION=NOで解除)
+- [x] 単体テスト(21件)PASS、実機で無移動XY(現在位置指定)の`ACK_XY`をserial_send内で受信することを確認
+- [ ] 実移動ジョグで固まらないことを実機確認
+- 暫定回避: ConsoleからPOSを送ると解除される
+
+## 2026-10-22: Atom JoyStick 簡易テスト操作
+
+- [x] JoystickProtocol / JoystickMapping(nativeテスト: デッドゾーン、カーブ、斜め上限、リミットマスク、CRC)
+- [x] Core2: JoystickLink、joystickTask、JogQueue、ジョグセッション、backend速度モード、StsServoBus jog API、POS/CONFIG表示
+- [x] Atom: `atoms3-joystick` env、AtomJoyMain(I2C読取、ESP-NOW 50Hz、状態表示、ボタン)
+- [x] 全env(m5stack-core2 / sim / hwtest / sts3020-test / atoms3-joystick)ビルドSUCCESS、native/WebUIテストPASS
+- [x] 実機: Atom(MAC 48:CA:43:39:ED:C4)とCore2(A4:F0:0F:DC:D7:78)がリンク、`JOY link UP`、POS `JOY=LINK`、SELFTEST PASS
+- [x] 1回目の実機操作(ユーザー): テストモードOFF時の無視、左ボタンでTEST_MODE ON、XY連続移動、`reason=limit_x`停止を確認。Yが逆向き → AtomのY符号を反転
+- [x] サーボが回らない原因: 角度制限0/0・torque OFFのままCore2再起動 → `unknown_turn_count`で拒否。復帰条件を緩和し、Serialの±1/4回転でID1(abs≈4731に復帰、hold check OK)・ID2ともPASS
+- [x] 2回目の実機操作(ユーザー確認「確認できました」): Y反転後の向き、Z/アームのジョグ開始、リンク断で`reason=link_lost`停止、右ボタンABORT→画面ボタンALARM_CLEAR
+- [x] XYジョグ速度を3000/600mm/min、加速度600mm/s^2へ変更(ユーザー要望)
+- [x] 速度4段階(SLOW 600 / FAST 3000 / VERY FAST 4500 / ULTRA 7500 mm/min)、プロトコルv2(ユーザー要望)
+- [ ] FAST/VERY FAST/ULTRAでの脱調・停止距離・リミット即停止時の衝撃を実機確認(ULTRAは高速スイープ確認範囲5000mm/minを超える)
+- [ ] ジョグ中にSerialコマンドを送ったときの`reason=serial_command`停止
+
+未解決リスク:
+
+- Core2でWi-Fi/ESP-NOWを起動したことによるステップ生成・UART通信への影響は未測定。
+- A/Bを独立に加減速するため、加減速中はXYの向きが少しずれる(純X/純Yは一致)。
+- ESP-NOWは暗号化なし(送信元MAC固定のみ)。簡易テスト専用。
+- スティックの向きとボタンenumの対応は実機確認待ち(`AXIS_SIGN`、`JOY_Z_SIGN`、`JOY_ARM_SIGN`で調整)。
+- サーボのジョグ開始時のhold check(200ms)中はセッションループが止まる。XY停止中のみ開始する設計で回避。

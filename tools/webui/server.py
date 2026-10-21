@@ -268,6 +268,19 @@ def update_state_from_log(line: str) -> None:
         state["machine"] = machine
 
 
+XY_COMMAND_RE = re.compile(r"XY\s")
+# Long enough for a POS that waits behind a queued move in motionTask.
+MOTION_SYNC_POS_TIMEOUT_S = 60.0
+
+
+def console_command_expect(command: str) -> str:
+    """Completion line to wait for so that motion-end logs are not lost."""
+    if XY_COMMAND_RE.match(command):
+        # Matches ACK_XY target=... and NACK_XY target=...
+        return "_XY target="
+    return ""
+
+
 def validate_test_command(command: str) -> tuple[str, float]:
     """Return (expect, timeout_s) for an allowed test page command."""
     for pattern, expect, timeout_s in TEST_COMMAND_PATTERNS:
@@ -350,7 +363,46 @@ def write_command_csv(command: str, expect: str = "") -> Path:
 
 def run_locked_command(args: list[str], *, label: str) -> int:
     with serial_lock:
-        return run_serial_send(args, label=label)
+        exit_code = run_serial_send(args, label=label)
+    sync_motion_state(args)
+    return exit_code
+
+
+def sync_motion_state(args: list[str]) -> None:
+    """If a command ended while MOTION still looks active, ask the firmware.
+
+    serial_send can exit before the motion-end line arrives, which left the UI
+    stuck in "Motion in progress". motionTask answers POS only after the move,
+    so a single POS settles the flag.
+    """
+    with state_lock:
+        if not state["machine"].get("motion") or state.get("jobRunning"):
+            return
+    try:
+        port = args[args.index("--port") + 1]
+        baud = int(args[args.index("--baud") + 1])
+    except (ValueError, IndexError):
+        return
+    with state_lock:
+        settings = dict(state.get("sendSettings", DEFAULT_SEND_SETTINGS))
+    settings = {**settings, "commandTimeoutS": MOTION_SYNC_POS_TIMEOUT_S}
+    csv_path = write_command_csv("POS", "POS ")
+    with serial_lock:
+        poll_args = command_args(port, baud, csv_path, settings)
+        try:
+            process = subprocess.run(
+                [sys.executable, str(SERIAL_SEND), *poll_args],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                timeout=MOTION_SYNC_POS_TIMEOUT_S + 10,
+            )
+        except subprocess.TimeoutExpired:
+            emit("error", "motion state sync (POS) timed out")
+            return
+    for line in (process.stdout + process.stderr).splitlines():
+        update_state_from_log(line)
+        update_test_state_from_log(line)
 
 
 def run_test_command(args: list[str], *, command: str) -> None:
@@ -944,7 +996,7 @@ class WebUIHandler(SimpleHTTPRequestHandler):
             settings = dict(state.get("sendSettings", DEFAULT_SEND_SETTINGS))
         if not port:
             raise ValueError("serial port is not configured")
-        csv_path = write_command_csv(command)
+        csv_path = write_command_csv(command, console_command_expect(command))
         threading.Thread(
             target=run_locked_command,
             args=(command_args(port, baud, csv_path, settings),),

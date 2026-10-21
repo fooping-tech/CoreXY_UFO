@@ -13,6 +13,7 @@ void Diagnostics::printHelp() {
   logMessage("PENUP PENDOWN PEN_STATUS (disabled while PEN_SERVO_ENABLED=false) SELFTEST TMC_INIT TMC_STATUS");
   logMessage("TEST_MODE <ON|OFF> TEST_JOG <dx_mm> <dy_mm> [feed] TEST_A/TEST_B <steps> [feed]");
   logMessage("SERVO_STATUS <id> SERVO_ANGLE <id> <deg> SERVO_TURN <id> <turns> SERVO_OFF <id>");
+  logMessage("Atom JoyStick (ESP-NOW): test mode only; any Serial command ends a jog");
   logMessage("G0/G1 X Y F G4 P<ms> G20 G21 G28 G90 G91 M3 M5 M114");
   logMessage("NeoPixel commands DISABLED (GPIO33 used by STS3020 UART RX)");
   logMessage("LED_PATTERN <OFF|SOLID|PACIFICA|FIRE|BREATH|CHASE|PROGRESS|ALERT|SUCCESS>");
@@ -53,6 +54,22 @@ void Diagnostics::printConfig() {
              job_controller.lastError());
   logMessage("JOB_BEGIN auto_home=%u HOME park_after_home=%u", JOB_BEGIN_AUTO_HOME,
              HOMING_PARK_AFTER_HOME_ENABLED);
+  {
+    uint8_t mac[6];
+    char core2_mac[18];
+    char atom_mac[18] = "none";
+    JoystickLink::localMac(mac);
+    formatMac(mac, core2_mac);
+    if (joystick_link.paired()) {
+      joystick_link.pairedMac(mac);
+      formatMac(mac, atom_mac);
+    }
+    logMessage("JOY enabled=%u ready=%u channel=%u core2_mac=%s atom_mac=%s feed=%.0f/%.0f/%.0f/%.0f servo=%ld",
+               JOYSTICK_ENABLED, joystick_link.ready(), JOY_ESPNOW_CHANNEL, core2_mac,
+               atom_mac, JOY_SLOW_FEED_MM_MIN, JOY_FAST_FEED_MM_MIN,
+               JOY_VERY_FAST_FEED_MM_MIN, JOY_ULTRA_FEED_MM_MIN,
+               static_cast<long>(JOY_SERVO_MAX_COUNTS_S));
+  }
   logMessage("JOB_END park_enabled=%u park=(%.3f,%.3f) park_feed=%.3f jingle_enabled=%u",
              JOB_END_PARK_ENABLED, JOB_END_PARK_X_MM, JOB_END_PARK_Y_MM,
              JOB_END_PARK_FEED_MM_MIN, JOB_END_JINGLE_ENABLED);
@@ -72,7 +89,7 @@ void Diagnostics::printConfig() {
 
 void Diagnostics::printPosition(const StatusMessage& status) {
   const MachineState& state = status.machine;
-  logMessage("POS X=%.3f Y=%.3f A=%ld B=%ld F=%.3f EN=HARDWIRED_ACTIVE HOMED=%s X_HOMED=%s Y_HOMED=%s HOMING=%s MOTION=%s JOB=%s PEN=%s ALARM=%s ALARM_REASON=\"%s\" TMC=%s LIMIT_X=%s LIMIT_Y=%s LIMIT_X_RAW=%s LIMIT_Y_RAW=%s TEST_MODE=%s",
+  logMessage("POS X=%.3f Y=%.3f A=%ld B=%ld F=%.3f EN=HARDWIRED_ACTIVE HOMED=%s X_HOMED=%s Y_HOMED=%s HOMING=%s MOTION=%s JOB=%s PEN=%s ALARM=%s ALARM_REASON=\"%s\" TMC=%s LIMIT_X=%s LIMIT_Y=%s LIMIT_X_RAW=%s LIMIT_Y_RAW=%s TEST_MODE=%s JOY=%s",
              state.x_mm, state.y_mm, state.a_steps, state.b_steps,
              state.feed_mm_min, state.homed ? "YES" : "NO",
              state.x_homed ? "YES" : "NO", state.y_homed ? "YES" : "NO",
@@ -86,7 +103,10 @@ void Diagnostics::printPosition(const StatusMessage& status) {
              status.y_limit_active ? "ACTIVE" : "OPEN",
              status.x_limit_raw_active ? "ACTIVE" : "OPEN",
              status.y_limit_raw_active ? "ACTIVE" : "OPEN",
-             state.test_mode_active ? "ON" : "OFF");
+             state.test_mode_active ? "ON" : "OFF",
+             !JOYSTICK_ENABLED          ? "OFF"
+             : state.joystick_link      ? "LINK"
+                                        : "NONE");
 }
 
 void Diagnostics::printLimitStatus(const StatusMessage& status) {

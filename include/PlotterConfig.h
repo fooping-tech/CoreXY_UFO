@@ -205,6 +205,43 @@ constexpr float TEST_JOG_MAX_FEED_MM_MIN = 1200.0f;
 static_assert(TEST_JOG_MAX_FEED_MM_MIN <= MAX_FEED_MM_MIN,
               "TEST_JOG_MAX_FEED_MM_MIN must be <= MAX_FEED_MM_MIN");
 
+// ============================================================================
+// Atom JoyStick (ESP-NOW, test mode only)
+// ============================================================================
+// 簡易テスト用。本番の指示はPCからUSBシリアル。テストモード中だけ有効。
+constexpr bool JOYSTICK_ENABLED = true;
+// ESP-NOWのWi-Fiチャネルは両ファームウェア共通のJoystickProtocol.hで定義する。
+// 受け付けるAtomのMAC。全0なら起動後に最初に受信したAtomへ固定する(CONFIGに表示)。
+constexpr uint8_t JOY_ALLOWED_MAC[6] = {0, 0, 0, 0, 0, 0};
+// この時間パケットが来なければリンク断として停止する [ms]。
+constexpr uint32_t JOY_LINK_TIMEOUT_MS = 250;
+// XYジョグ速度 [mm/min]。左スティック押し込みでSLOW→FAST→VERY FAST→ULTRA→SLOWと切替。
+// 2026-10-22: SLOW/FASTを600/3000へ、VERY FAST=FASTx1.5、ULTRA=FASTx2.5を追加(ユーザー要望)。
+constexpr float JOY_SLOW_FEED_MM_MIN = 600.0f;
+constexpr float JOY_FAST_FEED_MM_MIN = 3000.0f;
+constexpr float JOY_VERY_FAST_FEED_MM_MIN = JOY_FAST_FEED_MM_MIN * 1.5f;  // 4500
+constexpr float JOY_ULTRA_FEED_MM_MIN = JOY_FAST_FEED_MM_MIN * 2.5f;      // 7500
+// XYジョグの加減速 [mm/s^2]。減速停止距離 v^2/2a: FAST約2mm、VERY FAST約4.7mm、ULTRA約13mm。
+constexpr float JOY_ACCEL_MM_S2 = 600.0f;
+// スティックのデッドゾーン(フルスケール比)。
+constexpr float JOY_DEADZONE = 0.08f;
+// サーボ(ID1 Z / ID2 アーム)のジョグ最大速度 [counts/s]。800 ~= 0.2 rev/s。
+constexpr int32_t JOY_SERVO_MAX_COUNTS_S = 800;
+// 右スティック上 / 右でサーボが+方向(時計回り)に回るなら1。実機で合わせる。
+constexpr int8_t JOY_Z_SIGN = 1;
+constexpr int8_t JOY_ARM_SIGN = 1;
+// motionTaskのジョグ更新周期と、全軸0がこの時間続いたらセッション終了 [ms]。
+constexpr uint32_t JOY_SESSION_PERIOD_MS = 20;
+constexpr uint32_t JOY_SESSION_IDLE_EXIT_MS = 300;
+// サーボジョグのgoal先行時間 [ms]。速度 x 先行時間だけ先にgoalを置く。
+constexpr uint32_t JOY_SERVO_LEAD_MS = 200;
+static_assert(JOY_ULTRA_FEED_MM_MIN <= MAX_FEED_MM_MIN,
+              "JOY_ULTRA_FEED_MM_MIN must stay within MAX_FEED_MM_MIN");
+static_assert(JOY_SLOW_FEED_MM_MIN > 0.0f && JOY_SLOW_FEED_MM_MIN <= JOY_FAST_FEED_MM_MIN &&
+                  JOY_FAST_FEED_MM_MIN <= JOY_VERY_FAST_FEED_MM_MIN &&
+                  JOY_VERY_FAST_FEED_MM_MIN <= JOY_ULTRA_FEED_MM_MIN,
+              "joystick feeds must increase SLOW <= FAST <= VERY FAST <= ULTRA");
+
 // ペン上げ/下げのサーボ角度 [deg]。
 // 決め方: 機構に合わせて、紙を擦らない上げ角と十分に接地する下げ角を実測する。
 constexpr uint8_t PEN_UP_ANGLE_DEG = 60;

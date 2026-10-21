@@ -266,10 +266,13 @@ bool StsServoBus::enableTracking(uint8_t id, char* detail, size_t detail_size) {
     }
     state.abs_counts = raw_counts;
   } else if (min_limit == 0 && max_limit == 0) {
-    // Already multi-turn (e.g. after an ESP32 reset). Recover only from a
-    // servo holding at rest on its last goal.
+    // Already multi-turn (e.g. after an ESP32 reset, possibly with torque
+    // off). Recover from a servo at rest whose position still matches its
+    // last goal within the turn. A whole-turn mismatch (shaft turned a full
+    // turn by hand while torque was off) is caught by the hold check before
+    // any goal moves; it stops the servo within ~200 ms.
     const int offset = wrapDeltaCounts(raw_counts - floorModTurn(goal_counts));
-    if (torque != 1 || moving != 0 || abs(offset) > STS_TEST_TOLERANCE_COUNTS) {
+    if (moving != 0 || abs(offset) > STS_TEST_TOLERANCE_COUNTS) {
       snprintf(detail, detail_size,
                "reason=unknown_turn_count torque=%d moving=%d goal=%ld raw=%d "
                "(power-cycle servo)",
@@ -469,4 +472,111 @@ StsMoveResult StsServoBus::moveToAngle(uint8_t id, float angle_deg,
     return StsMoveResult::PASS;
   }
   return moveRelative(id, delta_counts, abort_requested, detail, detail_size);
+}
+
+bool StsServoBus::beginJog(uint8_t id, char* detail, size_t detail_size) {
+  detail[0] = '\0';
+  if (!initialized_ || !validId(id)) {
+    snprintf(detail, detail_size, "reason=invalid_id");
+    return false;
+  }
+  if (!checkReady(id, detail, detail_size)) return false;
+  Track& state = track(id);
+  if (!state.valid && !enableTracking(id, detail, detail_size)) return false;
+#if SIMULATION_MODE
+  state.jogging = true;
+  state.jog_goal_counts = state.abs_counts;
+  return true;
+#else
+  int raw_counts = 0;
+  if (!readRawPosition(id, raw_counts)) {
+    snprintf(detail, detail_size, "reason=read_failed");
+    return false;
+  }
+  const int drift = wrapDeltaCounts(raw_counts - state.last_raw_counts);
+  if (abs(drift) > STS_TEST_TOLERANCE_COUNTS) {
+    state.valid = false;
+    snprintf(detail, detail_size,
+             "reason=idle_drift drift=%+d tracking=INVALID (power-cycle servo)", drift);
+    return false;
+  }
+  updateTracking(state, raw_counts);
+  if (!holdAndVerify(id, state.abs_counts, raw_counts, detail, detail_size)) {
+    state.valid = false;
+    return false;
+  }
+  state.jogging = true;
+  state.jog_goal_counts = state.abs_counts;
+  state.jog_last_good_read_ms = millis();
+  return true;
+#endif
+}
+
+bool StsServoBus::updateJog(uint8_t id, int32_t counts_s, char* detail,
+                            size_t detail_size) {
+  if (!validId(id)) return false;
+  Track& state = track(id);
+  if (!state.jogging || !state.valid) return false;
+#if SIMULATION_MODE
+  state.abs_counts += counts_s * static_cast<int32_t>(JOY_SESSION_PERIOD_MS) / 1000;
+  state.last_raw_counts = floorModTurn(state.abs_counts);
+  (void)detail;
+  (void)detail_size;
+  return true;
+#else
+  int raw_counts = 0;
+  if (readRawPosition(id, raw_counts)) {
+    updateTracking(state, raw_counts);
+    state.jog_last_good_read_ms = millis();
+  } else if (millis() - state.jog_last_good_read_ms > STS_TEST_MAX_READ_GAP_MS) {
+    servo.WritePosEx(id, static_cast<int16_t>(state.jog_goal_counts),
+                     STS_TEST_SPEED_COUNTS_PER_S, STS_TEST_ACC);
+    state.jogging = false;
+    state.valid = false;
+    snprintf(detail, detail_size, "reason=feedback_lost tracking=INVALID");
+    return false;
+  }
+  // Runaway: the servo must stay near the goal we keep placing ahead of it.
+  const int32_t lead_counts =
+      static_cast<int32_t>(labs(counts_s)) * static_cast<int32_t>(JOY_SERVO_LEAD_MS) / 1000;
+  if (labs(state.abs_counts - state.jog_goal_counts) >
+      lead_counts + STS_TEST_RUNAWAY_MARGIN_COUNTS + STS_TEST_SPEED_COUNTS_PER_S / 2) {
+    servo.EnableTorque(id, 0);
+    state.jogging = false;
+    state.valid = false;
+    snprintf(detail, detail_size,
+             "reason=runaway abs=%ld goal=%ld torque=OFF tracking=INVALID",
+             static_cast<long>(state.abs_counts), static_cast<long>(state.jog_goal_counts));
+    return false;
+  }
+  int32_t goal_counts = state.abs_counts;
+  if (counts_s > 0) goal_counts += lead_counts;
+  if (counts_s < 0) goal_counts -= lead_counts;
+  if (goal_counts > STS_TEST_ABS_LIMIT_COUNTS) goal_counts = STS_TEST_ABS_LIMIT_COUNTS;
+  if (goal_counts < -STS_TEST_ABS_LIMIT_COUNTS) goal_counts = -STS_TEST_ABS_LIMIT_COUNTS;
+  if (goal_counts != state.jog_goal_counts) {
+    const uint16_t speed = static_cast<uint16_t>(
+        counts_s == 0 ? STS_TEST_SPEED_COUNTS_PER_S : labs(counts_s));
+    if (!servo.WritePosEx(id, static_cast<int16_t>(goal_counts), speed, STS_TEST_ACC)) {
+      snprintf(detail, detail_size, "reason=goal_write_failed");
+      return true;  // transient; keep tracking and retry next period
+    }
+    state.jog_goal_counts = goal_counts;
+  }
+  return true;
+#endif
+}
+
+void StsServoBus::endJog(uint8_t id) {
+  if (!validId(id)) return;
+  Track& state = track(id);
+  if (!state.jogging) return;
+  state.jogging = false;
+#if !SIMULATION_MODE
+  int raw_counts = 0;
+  if (readRawPosition(id, raw_counts)) updateTracking(state, raw_counts);
+  // Hold where it is instead of dropping torque (a loaded Z drum would fall).
+  servo.WritePosEx(id, static_cast<int16_t>(state.abs_counts), STS_TEST_SPEED_COUNTS_PER_S,
+                   STS_TEST_ACC);
+#endif
 }

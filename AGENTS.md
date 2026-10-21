@@ -145,6 +145,7 @@ FreeRTOSタスクは以下を基本とする。
 | `stepperFeedTask` | 1 | 6 | FastAccelStepperへの投入、実行管理 |
 | `tmcTask` | 1 | 3 | TMC2209初期化、電流、microstep、chop設定、低頻度診断 |
 | `safetyTask` | 1 | 4 | limit switch、E-stop、alarm管理 |
+| `joystickTask` | 0 | 2 | Atom JoyStick(ESP-NOW)の受信、JogQueue/CommandQueue投入(簡易テスト用) |
 
 優先順位の基本:
 
@@ -168,6 +169,7 @@ Core間はキューでつなぐ。
 | `LogQueue` | Core 1 → Core 0 | `LogMessage` | ログ出力 |
 | `MotionQueue` | Core 1内部 | `MotionBlock` | 将来のplanner用 |
 | `SegmentQueue` | Core 1内部 | `MotionSegment` | 将来のtimed segment用 |
+| `JogQueue` | Core 0 → Core 1 | `JogRequest`(長さ1、上書き) | Atom JoyStickの速度指令(テストモードのみ) |
 
 禁止:
 
@@ -306,6 +308,13 @@ Diagnostics
 - 起動時は自動位置指令を行わない
 - PENUP/PENDOWN/M3/M5と、診断用PEN_STATUSに接続する
 - UFO構成ではペン用サーボ未割当(`PEN_SERVO_ENABLED=false`)。PENUP/PENDOWNはERROR、M3/M5とジョブのpen upはサーボを動かさない
+
+### `JoystickLink` / `joystickTask`
+
+- Core 0。ESP-NOWでAtom JoyStickのパケットを受信・検証し、最新値を保持する
+- 速度指令はJogQueue、ボタン操作(TEST_MODE / ABORT / ALARM_CLEAR)はCommandQueueへ
+- モータ・サーボ・TMC UARTに直接触れない。ジョグの実行と安全判定はmotionTask
+- 本番の指示経路はUSBシリアル。Serialコマンドが来たらジョグセッションは終了する
 
 ### `StsServoBus`
 

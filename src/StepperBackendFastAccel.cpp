@@ -283,6 +283,52 @@ void StepperBackendFastAccel::endDiagnosticChord() {
 #endif
 }
 
+namespace {
+#if !SIMULATION_MODE
+void runMotorAtVelocity(FastAccelStepper* motor, int32_t steps_s,
+                        uint32_t accel_steps_s2) {
+  if (motor == nullptr) return;
+  if (steps_s == 0) {
+    if (motor->isRunning()) motor->stopMove();
+    return;
+  }
+  uint32_t speed_steps_s = static_cast<uint32_t>(steps_s < 0 ? -steps_s : steps_s);
+  if (speed_steps_s > MAX_MOTOR_SPEED_STEPS_S) speed_steps_s = MAX_MOTOR_SPEED_STEPS_S;
+  motor->setSpeedInHz(speed_steps_s);
+  motor->setAcceleration(static_cast<int32_t>(accel_steps_s2));
+  // runForward/runBackward update a running ramp and reverse if needed.
+  if (steps_s > 0) motor->runForward();
+  else motor->runBackward();
+}
+#endif
+}  // namespace
+
+bool StepperBackendFastAccel::setVelocityAB(int32_t a_steps_s, int32_t b_steps_s,
+                                            uint32_t accel_steps_s2) {
+#if SIMULATION_MODE
+  (void)a_steps_s;
+  (void)b_steps_s;
+  (void)accel_steps_s2;
+  return true;
+#else
+  if (!ready_ || accel_steps_s2 == 0) return false;
+  runMotorAtVelocity(motor_a_, a_steps_s, accel_steps_s2);
+  runMotorAtVelocity(motor_b_, b_steps_s, accel_steps_s2);
+  return true;
+#endif
+}
+
+void StepperBackendFastAccel::stopVelocity() {
+#if !SIMULATION_MODE
+  if (motor_a_ != nullptr && motor_a_->isRunning()) motor_a_->stopMove();
+  if (motor_b_ != nullptr && motor_b_->isRunning()) motor_b_->stopMove();
+#endif
+}
+
+void StepperBackendFastAccel::configureDefaultSpeed() {
+  configureSpeed(DEFAULT_FEED_MM_MIN);
+}
+
 void StepperBackendFastAccel::stop() {
 #if !SIMULATION_MODE
   if (motor_a_ != nullptr) motor_a_->forceStop();

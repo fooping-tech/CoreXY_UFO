@@ -19,6 +19,10 @@ struct MachineState {
   bool job_active = false;
   // Serial/WebUI test mode: allows un-homed TEST_JOG and SERVO_* moves.
   bool test_mode_active = false;
+  // Atom JoyStick (test input). Written by motionTask only.
+  bool joystick_link = false;
+  bool joystick_jog_active = false;
+  char joystick_last_event[32] = "";
   char homing_state[16] = "Idle";
 };
 

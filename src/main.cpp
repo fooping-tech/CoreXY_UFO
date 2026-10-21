@@ -2,12 +2,15 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include "AppContext.h"
+#include "JoystickMapping.h"
 #include "PlotterConfig.h"
 #include "TaskConfig.h"
 
 QueueHandle_t command_queue = nullptr;
 QueueHandle_t status_queue = nullptr;
 QueueHandle_t log_queue = nullptr;
+QueueHandle_t jog_queue = nullptr;
+QueueHandle_t joystick_status_queue = nullptr;
 QueueHandle_t led_command_queue = nullptr;
 MachineState machine_state;
 DiagnosticsState diagnostics_state;
@@ -15,6 +18,7 @@ SafetyManager safety_manager;
 StepperBackendFastAccel stepper_backend;
 TMC2209Manager tmc_manager(Serial2);
 StsServoBus sts_servo_bus;
+JoystickLink joystick_link;
 PenController pen_controller(sts_servo_bus);
 NeoPixelController neopixel_controller;
 LedPatternEngine led_pattern_engine;
@@ -48,6 +52,7 @@ void publishStatus() {
                        safety_manager.yLimitRawActive(),
                        diagnostics_state};
   xQueueOverwrite(status_queue, &status);
+  if (joystick_status_queue != nullptr) xQueueOverwrite(joystick_status_queue, &status);
 }
 
 void setup() {
@@ -56,6 +61,8 @@ void setup() {
   status_queue = xQueueCreate(1, sizeof(StatusMessage));
   log_queue = xQueueCreate(LOG_QUEUE_LENGTH, sizeof(LogMessage));
   led_command_queue = xQueueCreate(LED_COMMAND_QUEUE_LENGTH, sizeof(LedCommand));
+  jog_queue = xQueueCreate(1, sizeof(JogRequest));
+  joystick_status_queue = xQueueCreate(1, sizeof(StatusMessage));
 
   safety_manager.begin();
   // UART1 pen initialization is owned by motionTask on Core 1.
@@ -78,6 +85,10 @@ void setup() {
                           nullptr, CORE_MOTION);
   xTaskCreatePinnedToCore(safetyTask, "safetyTask", STACK_SAFETY, nullptr,
                           PRIORITY_SAFETY, nullptr, CORE_MOTION);
+  if (JOYSTICK_ENABLED) {
+    xTaskCreatePinnedToCore(joystickTask, "joystickTask", STACK_JOYSTICK, nullptr,
+                            PRIORITY_JOYSTICK, nullptr, CORE_UI);
+  }
   logMessage("CoreXY plotter ready. Type HELP.");
 }
 

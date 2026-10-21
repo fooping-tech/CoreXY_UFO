@@ -1,6 +1,8 @@
+import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -50,6 +52,41 @@ class ValidateTestCommandTest(unittest.TestCase):
         expect, timeout_s = server.validate_test_command("SERVO_TURN 1 3")
         self.assertEqual(expect, "SERVO_TURN id=")
         self.assertGreaterEqual(timeout_s, 30)
+
+
+class ConsoleCommandExpectTest(unittest.TestCase):
+    def test_xy_waits_for_ack_or_nack(self):
+        self.assertEqual(server.console_command_expect("XY 11.000 10.000 900"), "_XY target=")
+        self.assertIn(server.console_command_expect("XY 1 2"), "ACK_XY target=(1.000,2.000)")
+        self.assertIn(server.console_command_expect("XY 1 2"), "NACK_XY target=(1.000,2.000) reason=rejected")
+
+    def test_other_commands_keep_default(self):
+        for command in ["POS", "HOME", "PENUP", "XYZ", "ALARM_CLEAR"]:
+            with self.subTest(command=command):
+                self.assertEqual(server.console_command_expect(command), "")
+
+
+class SyncMotionStateTest(unittest.TestCase):
+    ARGS = ["--csv", "x.csv", "--port", "/dev/null", "--baud", "115200"]
+
+    def set_motion(self, motion):
+        with server.state_lock:
+            server.state["machine"] = dict(server.state["machine"], motion=motion)
+            server.state["jobRunning"] = False
+
+    def test_stuck_motion_is_cleared_by_pos(self):
+        self.set_motion(True)
+        pos = subprocess.CompletedProcess([], 0, stdout="POS X=1.000 Y=0.000 MOTION=NO\n", stderr="")
+        with mock.patch.object(server.subprocess, "run", return_value=pos) as run:
+            server.sync_motion_state(self.ARGS)
+        run.assert_called_once()
+        self.assertFalse(server.snapshot_state()["machine"]["motion"])
+
+    def test_no_pos_when_motion_already_idle(self):
+        self.set_motion(False)
+        with mock.patch.object(server.subprocess, "run") as run:
+            server.sync_motion_state(self.ARGS)
+        run.assert_not_called()
 
 
 class UpdateTestStateTest(unittest.TestCase):
