@@ -5,6 +5,7 @@
 #include "MachineState.h"
 #include "HomingController.h"
 #include "JobController.h"
+#include "JoystickLink.h"
 #include "LedPatternEngine.h"
 #include "NeoPixelController.h"
 #include "MotorMelodyController.h"
@@ -18,12 +19,17 @@ extern QueueHandle_t command_queue;
 extern QueueHandle_t status_queue;
 extern QueueHandle_t log_queue;
 extern QueueHandle_t led_command_queue;
+// Atom JoyStick: latest JogRequest (Core 0 -> Core 1, 1-deep, overwrite) and a
+// status copy for the joystick task (UI consumes status_queue).
+extern QueueHandle_t jog_queue;
+extern QueueHandle_t joystick_status_queue;
 extern MachineState machine_state;
 extern DiagnosticsState diagnostics_state;
 extern SafetyManager safety_manager;
 extern StepperBackendFastAccel stepper_backend;
 extern TMC2209Manager tmc_manager;
 extern StsServoBus sts_servo_bus;
+extern JoystickLink joystick_link;
 extern PenController pen_controller;
 extern NeoPixelController neopixel_controller;
 extern LedPatternEngine led_pattern_engine;
@@ -43,3 +49,4 @@ void stepperFeedTask(void*);
 void tmcTask(void*);
 void safetyTask(void*);
 void logTask(void*);
+void joystickTask(void*);

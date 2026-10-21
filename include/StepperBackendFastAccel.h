@@ -23,6 +23,13 @@ class StepperBackendFastAccel : public StepperBackend {
   DiagnosticPulseResult queueDiagnosticPulseA(uint32_t frequency_hz);
   DiagnosticPulseResult queueDiagnosticPulseB(uint32_t frequency_hz);
   void endDiagnosticChord();
+  // Joystick jog only: run continuously at signed step rates [steps/s].
+  // 0 decelerates that motor to a stop. Call configureDefaultSpeed() after
+  // the jog so later relative moves use the normal speed again.
+  bool setVelocityAB(int32_t a_steps_s, int32_t b_steps_s, uint32_t accel_steps_s2);
+  // Decelerate both motors to a stop (limit hits use stop() instead).
+  void stopVelocity();
+  void configureDefaultSpeed();
   void stop() override;
   bool isRunning() const override;
   void waitUntilIdle() override;

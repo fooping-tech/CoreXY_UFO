@@ -11,6 +11,7 @@ constexpr uint8_t PRIORITY_SAFETY = 4;
 constexpr uint8_t PRIORITY_MOTION = 5;
 constexpr uint8_t PRIORITY_STEPPER_FEED = 6;
 constexpr uint8_t PRIORITY_LOG = 1;
+constexpr uint8_t PRIORITY_JOYSTICK = 2;
 
 constexpr uint16_t COMMAND_QUEUE_LENGTH = 16;
 constexpr uint16_t STATUS_QUEUE_LENGTH = 4;
@@ -23,3 +24,4 @@ constexpr uint16_t STACK_MOTION = 6144;
 constexpr uint16_t STACK_STEPPER_FEED = 2048;
 constexpr uint16_t STACK_TMC = 2048;
 constexpr uint16_t STACK_SAFETY = 2048;
+constexpr uint16_t STACK_JOYSTICK = 4096;

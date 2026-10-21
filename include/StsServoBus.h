@@ -67,11 +67,24 @@ class StsServoBus {
 
   bool isTracking(uint8_t id) const;
 
+  // Joystick jog (test mode). beginJog() enables tracking and runs the hold
+  // check once; updateJog() keeps the goal "lead" ahead of the tracked
+  // position (0 holds); endJog() holds at the current position.
+  // false from beginJog/updateJog means the servo must not be jogged further
+  // in this session; detail has the reason.
+  bool beginJog(uint8_t id, char* detail, size_t detail_size);
+  bool updateJog(uint8_t id, int32_t counts_s, char* detail, size_t detail_size);
+  void endJog(uint8_t id);
+
  private:
   struct Track {
     bool valid = false;
     int32_t abs_counts = 0;
     int last_raw_counts = 0;
+    // Joystick jog state.
+    bool jogging = false;
+    int32_t jog_goal_counts = 0;
+    uint32_t jog_last_good_read_ms = 0;
   };
 
   bool validId(uint8_t id) const;

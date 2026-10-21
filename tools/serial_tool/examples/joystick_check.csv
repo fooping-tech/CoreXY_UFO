@@ -1,0 +1,4 @@
+command,delay_ms,expect,comment
+CONFIG,1000,JOY enabled=1,Core2 MAC and paired Atom MAC (atom_mac=none until the Atom is powered)
+POS,500,JOY=LINK,Atom JoyStick link is up
+POS,500,TEST_MODE=OFF,Joystick moves are ignored outside test mode

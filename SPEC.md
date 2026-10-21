@@ -1299,3 +1299,18 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - 再送(REAPPLIED)または無応答(NO_REPLY)へ遷移した場合、それまでREADYだったならHOMEDを解除する(VM断で保持トルクが失われた可能性)。ログは状態遷移時のみ。
 - `TEST_A`/`TEST_B`(LCDテストモード、WebUI Testタブ含む)も移動前に`ensureTmcReadyForMotion()`を通す。未応答なら`TEST_A result=REJECTED reason=tmc_not_ready`で動かさない。
 - `HOMING_PARK_AFTER_HOME_ENABLED=false`: `HOME`/`G28`/JOB_BEGIN自動homingの完了後にJOB_END退避位置(5, Y_MAX-5)へ移動しない。原点(リミット位置)で終了する。`HOME_X`/`HOME_Y`は従来から退避なし。JOB_ENDの退避は`JOB_END_PARK_ENABLED`のまま。CONFIGに`HOME park_after_home=`を表示。
+
+## 2026-10-22: Atom JoyStick による簡易テスト操作
+
+- 本番の指示はPCからUSBシリアル。Atom JoyStick(v1.0、AtomS3)は簡易テスト用で、テストモード中のみ有効。
+- 接続: ESP-NOW(チャネル`JOY_ESPNOW_CHANNEL`=1、暗号化なし)。Core2は起動後に最初に受信したAtomのMACに固定(`JOY_ALLOWED_MAC`全0時)。Atomは状態パケットを受けるまでブロードキャスト、受信後はCore2宛てユニキャスト。
+- プロトコル(`include/JoystickProtocol.h`): Atom→Core2 50Hz(magic `UFOJ`、version 1、seq、軸4本 -1000..1000、FASTフラグ、非常停止/テストモード切替/ALARM_CLEARの押下カウンタ、電池mV、CRC16-CCITT)。Core2→Atom 10Hz(test_mode/alarm/homed/jog_active/tmc_readyフラグ、直前のイベント文字列、CRC16)。ボタンはカウンタ方式で、リンク確立直後の値は基準として扱い動作させない。
+- 割り当て: 左スティック=XY、右スティック上下=Z(ID1)、左右=アーム(ID2)、右ボタン=ABORT、左ボタン1秒=TEST_MODE切替、画面ボタン1秒=ALARM_CLEAR、左スティック押し込み=FAST/SLOW(2026-10-22に1200/300から3000/600mm/minへ変更、加速度300→600mm/s^2)。
+- Core2: `joystickTask`(Core 0、優先度2、50Hz)がJogRequestを長さ1のJogQueueへ上書き投入。リンク断(250ms)で速度0。motionTaskは待機中20ms周期でJogQueueを確認し、テストモード・alarmなし・ジョブなし・homing中でない場合のみジョグセッションを開始。
+- ジョグセッション: XYは`StepperBackendFastAccel::setVelocityAB`(FastAccelStepper runForward/runBackward、加速度`JOY_ACCEL_MM_S2`)で連続移動。速度はデッドゾーン8%、二乗カーブ、斜め方向は合成速度を上限に制限。開始時にTMC確認とHOMED解除。サーボは`StsServoBus::beginJog/updateJog/endJog`(goal=追跡位置+速度×200ms、hold check、runaway guard、読出し欠落停止、|abs|<=28000)。XY移動中はサーボのジョグを開始しない(hold check中のリミット監視停止を避けるため)。
+- セッション終了条件: Serialコマンド到着、リンク断、テストモードOFF、全軸0が300ms、ABORT、alarm。終了時はXY減速停止、サーボは現在位置保持、backend速度を既定へ戻す。リミットが新たにONになったら即停止(`reason=limit_x|limit_y`)、ONのリミットへ向かう成分は0。
+- 診断: POSに`JOY=LINK|NONE|OFF`、CONFIGに`JOY enabled ready channel core2_mac atom_mac`。ログは`JOY link UP/LOST`、`JOY button: ...`、`JOY_JOG start/end reason=...`、`JOY_JOG ignored reason=...`。
+- `JOYSTICK_ENABLED=false`でジョイスティック機能全体を無効化できる。SIMULATION_MODEでもESP-NOWは有効(モータ出力なしでリンクとセッションを確認できる)。
+- 2026-10-22修正: AtomのY軸符号を左右とも反転(`AXIS_SIGN={1,-1,1,-1}`。左Yの逆向きを実機確認、右Yは同一部品のため同様に反転)。
+- 2026-10-22修正: 多回転追跡の復帰条件を緩和。角度制限0/0の場合、torqueの状態に関係なく「静止中かつ現在位置がgoalの1回転内位置と±5 counts一致」なら`abs = goal + offset`で復帰する(従来はtorque ON必須で、SERVO_OFF後にCore2を再起動するとサーボ電源再投入が必要だった)。1回転単位のずれはhold checkで検出し約200ms以内にtorque OFF。
+- 2026-10-22修正: XYジョグ速度を4段階に変更(プロトコルv2、flags bit0-1=速度段階)。SLOW 600 / FAST 3000 / VERY FAST 4500(FASTx1.5) / ULTRA 7500(FASTx2.5) mm/min。左スティック押し込みでSLOW→FAST→VERY FAST→ULTRA→SLOW、Atom起動時はFAST。加速度600mm/s^2のままで減速停止距離はFAST約2mm、VERY FAST約4.7mm、ULTRA約13mm。AtomとCore2は同じプロトコル版で書き込むこと(版違いのパケットは破棄)。

@@ -8,3 +8,9 @@ c++ -std=c++17 -DSIMULATION_MODE=1 \
   -o /tmp/corexy_plotter_native_motion_tests
 
 /tmp/corexy_plotter_native_motion_tests
+
+c++ -std=c++17 -Iinclude -Itest/native \
+  test/native/test_joystick.cpp src/JoystickMapping.cpp \
+  -o /tmp/corexy_plotter_native_joystick_tests
+
+/tmp/corexy_plotter_native_joystick_tests
