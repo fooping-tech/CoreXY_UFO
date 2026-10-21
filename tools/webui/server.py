@@ -116,7 +116,8 @@ TMC_RE = re.compile(r"TMC[:=]\s*(READY|NOT READY|OFF)", re.IGNORECASE)
 TEST_MODE_RE = re.compile(r"\bTEST_MODE(?:=| result=)(ON|OFF)\b")
 LIMIT_RAW_RE = re.compile(r"LIMIT_X_RAW=(OPEN|ACTIVE).*LIMIT_Y_RAW=(OPEN|ACTIVE)")
 TEST_RESULT_RE = re.compile(
-    r"^(TEST_MODE|TEST_JOG|TEST_A|TEST_B|SERVO_ANGLE|SERVO_TURN|SERVO_OFF|SERVO_STATUS)\b.*\bresult=(\S+)"
+    r"^(?:(TEST_MODE|TEST_JOG|TEST_A|TEST_B|SERVO_ANGLE|SERVO_TURN|SERVO_OFF|SERVO_STATUS)\b.*\bresult=(\S+)"
+    r"|ALARM_CLEAR complete)"
 )
 SERVO_LINE_RE = re.compile(r"^(SERVO_\w+) id=(\d+)\b(.*)$")
 KEY_VALUE_RE = re.compile(r"(\w+)=(\S+)")
