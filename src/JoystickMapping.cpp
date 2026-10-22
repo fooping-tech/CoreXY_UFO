@@ -27,10 +27,10 @@ JogRequest joyMapAxes(const int16_t axes[4], uint8_t speed_level,
     request.vy_mm_s *= feed_mm_s / speed_mm_s;
   }
   request.z_counts_s = static_cast<int32_t>(lroundf(
-      joyShapeAxis(axes[JOY_AXIS_RIGHT_Y], config.deadzone) *
+      joyShapeAxis(axes[JOY_AXIS_RIGHT_Y], config.servo_deadzone) *
       config.servo_max_counts_s * config.z_sign));
   request.arm_counts_s = static_cast<int32_t>(lroundf(
-      joyShapeAxis(axes[JOY_AXIS_RIGHT_X], config.deadzone) *
+      joyShapeAxis(axes[JOY_AXIS_RIGHT_X], config.servo_deadzone) *
       config.servo_max_counts_s * config.arm_sign));
   request.link = true;
   return request;

@@ -45,7 +45,7 @@ AtomのLCD: Link、TEST、ALARM、JOG、SPD(速度段階、VERY FAST以上は橙
 7. 右スティック上下でZ、左右でアームが回り、離すと保持する(回転方向が逆なら`JOY_Z_SIGN`/`JOY_ARM_SIGN`)
 8. ジョグ中にAtomの電源を切る → 250ms以内に停止(`reason=link_lost`)
 9. ジョグ中に右ボタン → 停止、`ALARM`。画面ボタン長押しで解除
-10. ジョグ中にSerialから`POS` → `reason=serial_command`で停止
+10. ジョグ中にSerialから`POS` → `reason=command`で停止(Atomのボタン操作も同じ理由で終了する)
 11. 左ボタン長押しでテストモードOFF → `HOME`してからジョブ
 
 ## Serial CSV

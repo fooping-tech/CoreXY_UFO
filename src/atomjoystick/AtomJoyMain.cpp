@@ -200,7 +200,12 @@ void drawStatus() {
   canvas.setTextColor((shown.flags & JOY_STATUS_ALARM) && linked ? TFT_RED : TFT_WHITE);
   canvas.printf("ALARM: %s\n", (shown.flags & JOY_STATUS_ALARM) && linked ? "YES" : "no");
   canvas.setTextColor(TFT_WHITE);
-  canvas.printf("JOG: %s\n", (shown.flags & JOY_STATUS_JOG_ACTIVE) ? "RUN" : "-");
+  canvas.printf("JOG: %s  %s\n", (shown.flags & JOY_STATUS_JOG_ACTIVE) ? "RUN" : "-",
+                (shown.flags & JOY_STATUS_HOMED) && linked ? "HOMED" : "");
+  // Distance from the home origin (valid once HOME has run).
+  canvas.setTextColor(TFT_GREENYELLOW);
+  canvas.printf("X%7.1f Y%7.1f\n", linked ? shown.x_mm : 0.0f, linked ? shown.y_mm : 0.0f);
+  canvas.setTextColor(TFT_WHITE);
   canvas.setTextColor(speed_level >= JOY_SPEED_VERY_FAST ? TFT_ORANGE : TFT_WHITE);
   canvas.printf("SPD: %s\n", joySpeedLevelName(speed_level));
   canvas.setTextColor(TFT_WHITE);
