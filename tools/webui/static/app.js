@@ -1,4 +1,5 @@
-const SOFT_LIMIT = { minX: 0, maxX: 500, minY: 0, maxY: 250 };
+// Keep in sync with X_MAX_MM / Y_MAX_MM in include/PlotterConfig.h.
+const SOFT_LIMIT = { minX: 0, maxX: 390, minY: 0, maxY: 200 };
 const API_TIMEOUT_MS = 5000;
 const JOG_FEED_MM_MIN = 900;
 const PREVIEW_SIZE = { width: 960, height: 640, pad: 36 };

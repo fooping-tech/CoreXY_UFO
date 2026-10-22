@@ -1314,3 +1314,16 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - 2026-10-22修正: AtomのY軸符号を左右とも反転(`AXIS_SIGN={1,-1,1,-1}`。左Yの逆向きを実機確認、右Yは同一部品のため同様に反転)。
 - 2026-10-22修正: 多回転追跡の復帰条件を緩和。角度制限0/0の場合、torqueの状態に関係なく「静止中かつ現在位置がgoalの1回転内位置と±5 counts一致」なら`abs = goal + offset`で復帰する(従来はtorque ON必須で、SERVO_OFF後にCore2を再起動するとサーボ電源再投入が必要だった)。1回転単位のずれはhold checkで検出し約200ms以内にtorque OFF。
 - 2026-10-22修正: XYジョグ速度を4段階に変更(プロトコルv2、flags bit0-1=速度段階)。SLOW 600 / FAST 3000 / VERY FAST 4500(FASTx1.5) / ULTRA 7500(FASTx2.5) mm/min。左スティック押し込みでSLOW→FAST→VERY FAST→ULTRA→SLOW、Atom起動時はFAST。加速度600mm/s^2のままで減速停止距離はFAST約2mm、VERY FAST約4.7mm、ULTRA約13mm。AtomとCore2は同じプロトコル版で書き込むこと(版違いのパケットは破棄)。
+
+## 2026-10-22: ソフトリミット変更
+
+- ユーザー実機確認によりソフトリミットをX 0..390mm、Y 0..200mm(ユーザー指定値、余裕込み)へ変更。旧値X 500 / Y 250は暫定値だった。
+- 連動: JOB_END退避位置は(5, 195)。WebUIの`SOFT_LIMIT`(プレビュー・範囲警告)と、server.pyのテキストG-code生成上限(`--max-x/--max-y`)も390/200へ。
+- ソフトリミットはhoming後の通常XY/G-code移動に適用される。テストモード(TEST_JOG、ジョイスティック)はホーミング不要のため適用されない(奥側にリミットスイッチはない)。
+
+## 2026-10-22: ジョイスティックのXYラグ対策
+
+- 症状: 左スティック(XY)を倒してから動くまでに時々ラグ。原因: 右スティックの中央付近のわずかなズレ(z=±1等)でサーボのジョグが始まり、200msのhold check中はセッションループが止まってXYが待たされていた。
+- 対策: サーボ軸(右スティック)用のデッドゾーン`JOY_SERVO_DEADZONE`=25%をXY用(8%)と分けた。
+- 計測ログ: `JOY_JOG xy_start after_session_ms= request_age_ms= tmc_check_ms=`、`JOY_JOG servo id= begin_ms=`。実測: after_session 18ms(うちTMC確認17ms)、request_age 1〜20ms。ユーザー確認でラグなし。
+- セッション終了理由`serial_command`を`command`へ改名(Atomのボタン操作もCommandQueue経由で同じ理由になるため)。

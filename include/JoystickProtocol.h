@@ -8,7 +8,7 @@
 // any change.
 
 constexpr uint32_t JOY_PROTOCOL_MAGIC = 0x4A4F4655;  // bytes "UFOJ"
-constexpr uint8_t JOY_PROTOCOL_VERSION = 2;  // v2: speed level replaces FAST flag
+constexpr uint8_t JOY_PROTOCOL_VERSION = 3;  // v3: status carries X/Y position
 constexpr int16_t JOY_AXIS_FULL_SCALE = 1000;
 // Wi-Fi channel used by both sides (no access point is joined).
 constexpr uint8_t JOY_ESPNOW_CHANNEL = 1;
@@ -72,6 +72,10 @@ struct __attribute__((packed)) JoyStatusPacket {
   uint8_t version;
   uint8_t flags;
   uint16_t ack_seq;
+  // Position estimate [mm] from the home origin. Stays valid after test-mode
+  // moves clear HOMED (it keeps counting steps); not valid before any HOME.
+  float x_mm;
+  float y_mm;
   char last_result[40];
   uint16_t crc;
 };

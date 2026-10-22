@@ -16,7 +16,10 @@ struct JogRequest {
 };
 
 struct JoyMapConfig {
-  float deadzone = 0.08f;          // fraction of full scale
+  float deadzone = 0.08f;          // fraction of full scale (XY)
+  // Servo axes start only on a clear push: a slightly off-center right stick
+  // must not start a servo jog (its 200 ms hold check delays XY).
+  float servo_deadzone = 0.25f;
   // Indexed by JoySpeedLevel (SLOW, FAST, VERY_FAST, ULTRA).
   float feed_mm_min[4] = {600.0f, 3000.0f, 4500.0f, 7500.0f};
   int32_t servo_max_counts_s = 800;

@@ -268,6 +268,10 @@ def update_state_from_log(line: str) -> None:
         state["machine"] = machine
 
 
+# Keep in sync with X_MAX_MM / Y_MAX_MM in include/PlotterConfig.h.
+SOFT_LIMIT_X_MAX_MM = 390
+SOFT_LIMIT_Y_MAX_MM = 200
+
 XY_COMMAND_RE = re.compile(r"XY\s")
 # Long enough for a POS that waits behind a queued move in motionTask.
 MOTION_SYNC_POS_TIMEOUT_S = 60.0
@@ -1231,9 +1235,9 @@ class WebUIHandler(SimpleHTTPRequestHandler):
             "--dwell-ms",
             str(dwell_ms),
             "--max-x",
-            "500",
+            str(SOFT_LIMIT_X_MAX_MM),
             "--max-y",
-            "250",
+            str(SOFT_LIMIT_Y_MAX_MM),
             "-o",
             str(temp_path),
         ]

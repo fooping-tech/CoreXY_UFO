@@ -54,6 +54,11 @@ void testMapAxes() {
   require(servo.z_counts_s == 800, "right stick up drives Z at max counts/s");
   require(servo.arm_counts_s == 800, "arm sign inverts right stick X");
 
+  const int16_t right_stick_drift[4] = {0, 0, 200, -200};
+  JogRequest drift = joyMapAxes(right_stick_drift, JOY_SPEED_FAST, config);
+  require(drift.z_counts_s == 0 && drift.arm_counts_s == 0,
+          "small right stick offsets do not start servos");
+
   const int16_t centered[4] = {0, 0, 0, 0};
   require(jogRequestIsZero(joyMapAxes(centered, JOY_SPEED_FAST, config)), "centered request is zero");
 }

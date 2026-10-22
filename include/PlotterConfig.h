@@ -111,10 +111,12 @@ constexpr uint32_t AB_TIMED_MIN_DURATION_US = 1000;
 // soft limit [mm]。homing後の通常XY移動をこの範囲に制限する。
 // 決め方: 実際にペン先が安全に動ける作業範囲から少し余裕を引いた値。
 // 2026-10-11: 暫定でX 500 / Y 250mm。実機ストローク未確認。
+// 2026-10-22: ユーザー実機確認によりX 390 / Y 200mm(ユーザー指定値、余裕込み)。
+// WebUIのSOFT_LIMIT(tools/webui/static/app.js)とserver.pyのテキスト生成上限も合わせる。
 constexpr float X_MIN_MM = 0.0f;
-constexpr float X_MAX_MM = 500.0f;
+constexpr float X_MAX_MM = 390.0f;
 constexpr float Y_MIN_MM = 0.0f;
-constexpr float Y_MAX_MM = 250.0f;
+constexpr float Y_MAX_MM = 200.0f;
 
 // JOB_END時の退避位置 [mm]。
 // 描画物からペンを離し、次ジョブの準備状態を見やすくする。
@@ -223,8 +225,10 @@ constexpr float JOY_VERY_FAST_FEED_MM_MIN = JOY_FAST_FEED_MM_MIN * 1.5f;  // 450
 constexpr float JOY_ULTRA_FEED_MM_MIN = JOY_FAST_FEED_MM_MIN * 2.5f;      // 7500
 // XYジョグの加減速 [mm/s^2]。減速停止距離 v^2/2a: FAST約2mm、VERY FAST約4.7mm、ULTRA約13mm。
 constexpr float JOY_ACCEL_MM_S2 = 600.0f;
-// スティックのデッドゾーン(フルスケール比)。
+// スティックのデッドゾーン(フルスケール比)。XY用と、サーボ(右スティック)用。
+// サーボ側は中央付近のわずかなズレでジョグ開始(200msのhold check)しないよう大きめにする。
 constexpr float JOY_DEADZONE = 0.08f;
+constexpr float JOY_SERVO_DEADZONE = 0.25f;
 // サーボ(ID1 Z / ID2 アーム)のジョグ最大速度 [counts/s]。800 ~= 0.2 rev/s。
 constexpr int32_t JOY_SERVO_MAX_COUNTS_S = 800;
 // 右スティック上 / 右でサーボが+方向(時計回り)に回るなら1。実機で合わせる。

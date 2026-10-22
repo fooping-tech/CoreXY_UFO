@@ -1108,6 +1108,12 @@ void runJogSession(const JogRequest& first) {
   JogRequest request = first;
   const MotionSyncReference reference = captureMotionSyncReference();
 
+  const uint32_t session_start_ms = millis();
+  // Latency diagnostics: request age at start, TMC check, servo hold checks,
+  // and the time until XY gets its first velocity command.
+  const uint32_t request_age_ms = session_start_ms - first.time_ms;
+  uint32_t tmc_check_ms = 0;
+  bool xy_start_logged = false;
   machine_state.joystick_jog_active = true;
   setMotionActive(true);
   logMessage("JOY_JOG start vx=%.1f vy=%.1f z=%ld arm=%ld", first.vx_mm_s, first.vy_mm_s,
@@ -1119,7 +1125,8 @@ void runJogSession(const JogRequest& first) {
       break;
     }
     if (has_pending_command || !commandQueueEmpty()) {
-      reason = "serial_command";
+      // Serial/WebUI commands and joystick buttons (TEST_MODE, ABORT, ...).
+      reason = "command";
       break;
     }
     if (!machine_state.test_mode_active) {
@@ -1155,7 +1162,9 @@ void runJogSession(const JogRequest& first) {
     joyMaskTowardLimits(vx_mm_s, vy_mm_s, x_active, y_active, HOMING_X_DIR, HOMING_Y_DIR);
     const bool xy_requested = vx_mm_s != 0.0f || vy_mm_s != 0.0f;
     if (xy_requested && !xy_ready && !xy_failed) {
+      const uint32_t tmc_started_ms = millis();
       xy_failed = !ensureTmcReadyForMotion("JOY_JOG");
+      tmc_check_ms = millis() - tmc_started_ms;
       if (!xy_failed) {
         invalidateHomed("joystick jog without homing");
         xy_ready = true;
@@ -1166,6 +1175,13 @@ void runJogSession(const JogRequest& first) {
       const CoreXYDelta rate =
           CoreXYKinematics::xyDeltaToABSteps(vx_mm_s, vy_mm_s, STEPS_PER_MM);
       stepper_backend.setVelocityAB(rate.a_steps, rate.b_steps, accel_steps_s2);
+      if (!xy_start_logged) {
+        xy_start_logged = true;
+        logMessage("JOY_JOG xy_start after_session_ms=%lu request_age_ms=%lu tmc_check_ms=%lu",
+                   static_cast<unsigned long>(millis() - session_start_ms),
+                   static_cast<unsigned long>(request_age_ms),
+                   static_cast<unsigned long>(tmc_check_ms));
+      }
       moving_toward_x = vx_mm_s * static_cast<float>(HOMING_X_DIR) > 0.0f;
       moving_toward_y = vy_mm_s * static_cast<float>(HOMING_Y_DIR) > 0.0f;
     } else if (xy_ready) {
@@ -1181,12 +1197,15 @@ void runJogSession(const JogRequest& first) {
       char detail[96] = "";
       if (!servo_begun[i]) {
         if (servo_rates[i] == 0 || stepper_backend.isRunning()) continue;
+        const uint32_t begin_started_ms = millis();
         if (!sts_servo_bus.beginJog(SERVO_IDS[i], detail, sizeof(detail))) {
           servo_failed[i] = true;
           logMessage("JOY_JOG servo id=%u disabled %s", SERVO_IDS[i], detail);
           continue;
         }
         servo_begun[i] = true;
+        logMessage("JOY_JOG servo id=%u begin_ms=%lu (hold check; XY waits)", SERVO_IDS[i],
+                   static_cast<unsigned long>(millis() - begin_started_ms));
       }
       if (!sts_servo_bus.updateJog(SERVO_IDS[i], servo_rates[i], detail, sizeof(detail))) {
         servo_failed[i] = true;

@@ -17,6 +17,7 @@ constexpr uint32_t JOY_STATUS_PERIOD_MS = 100;
 JoyMapConfig mapConfig() {
   JoyMapConfig config;
   config.deadzone = JOY_DEADZONE;
+  config.servo_deadzone = JOY_SERVO_DEADZONE;
   config.feed_mm_min[JOY_SPEED_SLOW] = JOY_SLOW_FEED_MM_MIN;
   config.feed_mm_min[JOY_SPEED_FAST] = JOY_FAST_FEED_MM_MIN;
   config.feed_mm_min[JOY_SPEED_VERY_FAST] = JOY_VERY_FAST_FEED_MM_MIN;
@@ -42,6 +43,8 @@ void sendStatus(const StatusMessage& status, uint16_t ack_seq) {
   JoyStatusPacket packet{};
   const MachineState& machine = status.machine;
   packet.ack_seq = ack_seq;
+  packet.x_mm = machine.x_mm;
+  packet.y_mm = machine.y_mm;
   if (machine.test_mode_active) packet.flags |= JOY_STATUS_TEST_MODE;
   if (machine.alarmed) packet.flags |= JOY_STATUS_ALARM;
   if (machine.homed) packet.flags |= JOY_STATUS_HOMED;
