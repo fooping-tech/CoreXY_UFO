@@ -1327,3 +1327,9 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - 対策: サーボ軸(右スティック)用のデッドゾーン`JOY_SERVO_DEADZONE`=25%をXY用(8%)と分けた。
 - 計測ログ: `JOY_JOG xy_start after_session_ms= request_age_ms= tmc_check_ms=`、`JOY_JOG servo id= begin_ms=`。実測: after_session 18ms(うちTMC確認17ms)、request_age 1〜20ms。ユーザー確認でラグなし。
 - セッション終了理由`serial_command`を`command`へ改名(Atomのボタン操作もCommandQueue経由で同じ理由になるため)。
+
+## 2026-10-22: サーボ速度の高速化
+
+- テストモードのサーボ速度`STS_TEST_SPEED_COUNTS_PER_S`を800→2400 counts/s(約0.6 rev/s)、`STS_TEST_ACC`を20→50(5000 counts/s^2)。SERVO_TURN/SERVO_ANGLE(WebUI Testタブ、Serial)とジョイスティック(`JOY_SERVO_MAX_COUNTS_S`は同値)の両方に適用。
+- 読出し欠落で追跡を無効化する時間`STS_TEST_MAX_READ_GAP_MS`を500→250ms(欠落中の移動を600 counts以下に抑え、折り返し補正の半回転条件を守る)。速度×欠落時間<1/4回転をstatic_assertで保証。
+- 実測(無負荷、7.6V): 1/4回転 約0.93s、1回転 約2.2s、3回転 約5.6s(従来15.7s)、誤差±1 count、error flags 0x00。

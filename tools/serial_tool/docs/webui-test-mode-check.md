@@ -55,7 +55,7 @@ python tools/webui/server.py
 7. Xスイッチを押したまま`-X` → `result=REJECTED reason=x_limit_active_toward_limit`
 8. Motors: `80`で`A+`、`B+`、`A-`、`B-`の方向を確認
 9. Servo ID1: `STATUS` → `limits=0/4095`、`+1/4` → `SERVO_TURN ... result=PASS`、`-1/4`で戻る
-10. Servo ID1: `Turns 3`で`ROTATE`(右3回転、約16s)、`-3`で戻る
+10. Servo ID1: `Turns 3`で`ROTATE`(右3回転、約6s)、`-3`で戻る
 11. Servo ID2: `Angle 180`で`MOVE TO ANGLE` → `SERVO_ANGLE ... result=PASS`
 12. `STOP`を移動中に押す → 停止、`ALARM`。`CLEAR ALARM`で復帰
 13. `EXIT TEST MODE`、`Control`で`HOME`
