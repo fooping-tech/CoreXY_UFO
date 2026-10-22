@@ -177,9 +177,11 @@ constexpr uint8_t STS_SERVO_ID_MIN = 1;
 constexpr uint8_t STS_SERVO_ID_MAX = 2;
 // 1回転 = 4096 counts。
 constexpr int32_t STS_COUNTS_PER_TURN = 4096;
-// テストモードの低速設定。800 counts/s ~= 70deg/s。ACC単位は100 counts/s^2。
-constexpr uint16_t STS_TEST_SPEED_COUNTS_PER_S = 800;
-constexpr uint8_t STS_TEST_ACC = 20;
+// テストモードのサーボ速度。ACC単位は100 counts/s^2。
+// 2026-10-22: 800から2400 counts/s(約0.6 rev/s、211deg/s)へ(ユーザー要望)。
+// STS3020の無負荷最大は7.4Vで約4500 counts/s。ACCは2400到達0.48s(約580 counts)。
+constexpr uint16_t STS_TEST_SPEED_COUNTS_PER_S = 2400;
+constexpr uint8_t STS_TEST_ACC = 50;
 // 1回のSERVO_TURN上限 [turn]と、追跡位置の上限(サーボの多回転goal +/-30719内)。
 constexpr float STS_TEST_MAX_TURNS = 3.0f;
 constexpr int32_t STS_TEST_ABS_LIMIT_COUNTS = 28000;
@@ -187,13 +189,17 @@ constexpr int32_t STS_TEST_ABS_LIMIT_COUNTS = 28000;
 constexpr int STS_TEST_TOLERANCE_COUNTS = 5;
 constexpr uint32_t STS_TEST_POLL_INTERVAL_MS = 20;
 constexpr uint32_t STS_TEST_TIMEOUT_MARGIN_MS = 2000;
-// 折り返し補正はpoll間の移動が半回転未満の間だけ有効。800 counts/s * 0.5s = 400 counts。
-constexpr uint32_t STS_TEST_MAX_READ_GAP_MS = 500;
+// 折り返し補正はpoll間の移動が半回転未満の間だけ有効。読出し欠落がこの時間を超えたら
+// 追跡を無効化して止める。2400 counts/s * 0.25s = 600 counts(半回転2048より十分小さい)。
+constexpr uint32_t STS_TEST_MAX_READ_GAP_MS = 250;
 // hold check: hold + torque ON後この時間で+/-許容を超えて動けば即torque OFF。
 constexpr uint32_t STS_TEST_HOLD_CHECK_MS = 200;
 constexpr int STS_TEST_HOLD_CHECK_TOLERANCE_COUNTS = 10;
 // runaway guard: 逆方向またはdelta超過がこの量を超えたら即torque OFF。
 constexpr int STS_TEST_RUNAWAY_MARGIN_COUNTS = 50;
+static_assert(static_cast<uint32_t>(STS_TEST_SPEED_COUNTS_PER_S) * STS_TEST_MAX_READ_GAP_MS / 1000 <
+                  static_cast<uint32_t>(STS_COUNTS_PER_TURN / 4),
+              "servo must move less than a quarter turn within STS_TEST_MAX_READ_GAP_MS");
 static_assert(STS_TEST_MAX_TURNS * STS_COUNTS_PER_TURN < STS_TEST_ABS_LIMIT_COUNTS,
               "STS_TEST_MAX_TURNS must fit inside STS_TEST_ABS_LIMIT_COUNTS");
 
@@ -229,8 +235,8 @@ constexpr float JOY_ACCEL_MM_S2 = 600.0f;
 // サーボ側は中央付近のわずかなズレでジョグ開始(200msのhold check)しないよう大きめにする。
 constexpr float JOY_DEADZONE = 0.08f;
 constexpr float JOY_SERVO_DEADZONE = 0.25f;
-// サーボ(ID1 Z / ID2 アーム)のジョグ最大速度 [counts/s]。800 ~= 0.2 rev/s。
-constexpr int32_t JOY_SERVO_MAX_COUNTS_S = 800;
+// サーボ(ID1 Z / ID2 アーム)のジョグ最大速度 [counts/s]。2400 ~= 0.6 rev/s。
+constexpr int32_t JOY_SERVO_MAX_COUNTS_S = STS_TEST_SPEED_COUNTS_PER_S;
 // 右スティック上 / 右でサーボが+方向(時計回り)に回るなら1。実機で合わせる。
 constexpr int8_t JOY_Z_SIGN = 1;
 constexpr int8_t JOY_ARM_SIGN = 1;
