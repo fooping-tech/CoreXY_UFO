@@ -5,7 +5,7 @@
 #   - force push (--force, -f, --force-with-lease, +refspec)
 #   - destructive git: reset --hard, clean -f, branch -D, checkout/restore that discards work,
 #     push --delete, filter-branch, gc --prune=now
-#   - git commit when the staged diff contains something that looks like a credential
+#   - git commit when anything that could be committed (staged, unstaged, untracked) looks like a credential
 # Anything else passes through. A human can still run these commands directly in a terminal.
 set -u
 
@@ -20,6 +20,9 @@ block() {
   echo "このリポジトリの運用ルール(CLAUDE.md)で禁止されています。必要ならユーザーに理由を説明し、ユーザー自身に実行してもらってください。" >&2
   exit 2
 }
+
+SECRET_RE='gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{30,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[A-Za-z0-9-]{10,}'
+SECRET_FILE_RE='(^|/)(\.env|.*\.pem|.*\.key|id_rsa.*|credentials.*|secrets?\..*)$'
 
 # Split compound commands so each git invocation is checked on its own.
 SEGMENTS=$(printf '%s' "$CMD" | sed -E 's/(&&|\|\||;|\|)/\n/g')
@@ -43,7 +46,7 @@ while IFS= read -r seg; do
       if [[ "$seg" =~ (^|[[:space:]])(--delete|-d)([[:space:]]|$) ]] || [[ "$seg" =~ [[:space:]]:[^[:space:]]+ ]]; then
         block "リモートブランチの削除は禁止です: $seg"
       fi
-      if [[ "$seg" =~ (^|[[:space:]:])(main|master)([[:space:]]|$) ]]; then
+      if [[ "$seg" =~ (^|[[:space:]:])(refs/heads/)?(main|master)([[:space:]]|$) ]]; then
         block "main への直接 push は禁止です。作業ブランチから PR を作成してください: $seg"
       fi
       # "git push" / "git push origin" with no refspec pushes the current branch.
@@ -73,11 +76,20 @@ while IFS= read -r seg; do
       [[ "$seg" =~ --prune=now ]] && block "git gc --prune=now は禁止です。"
       ;;
     commit)
-      hits=$(git -C "${dir:-.}" diff --cached 2>/dev/null | grep -E '^\+' | grep -E \
-        'gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{30,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[A-Za-z0-9-]{10,}' | head -3)
-      [ -n "$hits" ] && block "ステージされた変更に認証情報らしき文字列があります。コミットから外してください。"
-      files=$(git -C "${dir:-.}" diff --cached --name-only 2>/dev/null | grep -E '(^|/)(\.env|.*\.pem|.*\.key|id_rsa.*|credentials.*|secrets?\..*)$' | head -3)
-      [ -n "$files" ] && block "認証情報らしきファイルがステージされています: $files"
+      # The hook runs before the whole command, so "git add x && git commit" or "commit -a"
+      # would commit content that is not staged yet. Check everything that could end up in
+      # the commit: staged + unstaged tracked changes, and untracked files that are not ignored.
+      d=${dir:-.}
+      untracked=$(git -C "$d" ls-files --others --exclude-standard 2>/dev/null)
+      hits=$( { git -C "$d" diff HEAD 2>/dev/null || git -C "$d" diff --cached 2>/dev/null; } | grep -E '^\+' | grep -E "$SECRET_RE" | head -3)
+      if [ -z "$hits" ] && [ -n "$untracked" ]; then
+        hits=$(cd "$d" && printf '%s\n' "$untracked" | while IFS= read -r f; do
+          [ -f "$f" ] && [ "$(wc -c < "$f")" -lt 1048576 ] && grep -lE "$SECRET_RE" "$f" 2>/dev/null
+        done | head -3)
+      fi
+      [ -n "$hits" ] && block "コミットされうる変更(ステージ済み・未ステージ・未追跡)に認証情報らしき文字列があります。該当ファイルを外すか .gitignore に入れてください。"
+      files=$( { git -C "$d" diff HEAD --name-only 2>/dev/null; git -C "$d" diff --cached --name-only 2>/dev/null; printf '%s\n' "$untracked"; } | grep -E "$SECRET_FILE_RE" | sort -u | head -3)
+      [ -n "$files" ] && block "認証情報らしきファイルがコミット対象になりえます: $files"
       ;;
   esac
 done <<< "$SEGMENTS"
