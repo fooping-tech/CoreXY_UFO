@@ -214,9 +214,11 @@ static_assert(TEST_JOG_MAX_FEED_MM_MIN <= MAX_FEED_MM_MIN,
               "TEST_JOG_MAX_FEED_MM_MIN must be <= MAX_FEED_MM_MIN");
 
 // ============================================================================
-// Atom JoyStick (ESP-NOW, test mode only)
+// Atom JoyStick (ESP-NOW)
 // ============================================================================
-// 簡易テスト用。本番の指示はPCからUSBシリアル。テストモード中だけ有効。
+// 簡易操作用。本番の指示はPCからUSBシリアル。
+// 2026-10-24: TEST_MODE不要に変更(CoreXY_UFO_Game HANDOFF_FIRMWARE_JOG §3.0)。
+// HOMEDのジョグはHOMEDを保ちソフトリミット手前で止まる。シリアルJOG中は無視する。
 constexpr bool JOYSTICK_ENABLED = true;
 // ESP-NOWのWi-Fiチャネルは両ファームウェア共通のJoystickProtocol.hで定義する。
 // 受け付けるAtomのMAC。全0なら起動後に最初に受信したAtomへ固定する(CONFIGに表示)。
@@ -251,6 +253,28 @@ static_assert(JOY_SLOW_FEED_MM_MIN > 0.0f && JOY_SLOW_FEED_MM_MIN <= JOY_FAST_FE
                   JOY_FAST_FEED_MM_MIN <= JOY_VERY_FAST_FEED_MM_MIN &&
                   JOY_VERY_FAST_FEED_MM_MIN <= JOY_ULTRA_FEED_MM_MIN,
               "joystick feeds must increase SLOW <= FAST <= VERY FAST <= ULTRA");
+
+// ============================================================================
+// Serial JOG / STOP (CoreXY_UFO_Game HANDOFF_FIRMWARE_JOG)
+// ============================================================================
+// デッドマン: 最後のJOGからこの時間内に次のJOGが来なければ減速停止する [ms]。
+// ホストは押している間50ms(20Hz)ごとに送る。
+constexpr uint32_t SERIAL_JOG_TIMEOUT_MS = JOY_LINK_TIMEOUT_MS;
+// シリアルJOGのXY加減速 [mm/s^2]。ジョイスティックと同じ。
+constexpr float SERIAL_JOG_ACCEL_MM_S2 = 600.0f;
+// ジョグ中のJOG_POS出力周期 [ms](20Hz)。0で出力しない。
+constexpr uint32_t JOG_POS_INTERVAL_MS = 50;
+// HOMED中のソフトリミット減速。外向き速度を sqrt(2 * a * ratio * d) 以下に抑える。
+// CoreXYは各モータが独立に加減速するため、軸の減速度は最悪で公称の1/sqrt(2)になる。
+// 0.5はそれより小さく取った安全率。lookaheadは指令更新周期+遅れの見込み [s]。
+constexpr float JOG_SOFT_LIMIT_BRAKE_RATIO = 0.5f;
+constexpr float JOG_SOFT_LIMIT_LOOKAHEAD_S = 0.040f;
+// 境界までの残りがこの距離以下なら外向き速度を0にする [mm]。
+constexpr float JOG_SOFT_LIMIT_STOP_TOLERANCE_MM = 0.05f;
+static_assert(SERIAL_JOG_ACCEL_MM_S2 > 0.0f && SERIAL_JOG_ACCEL_MM_S2 <= MAX_ACCEL_MM_S2,
+              "SERIAL_JOG_ACCEL_MM_S2 must be in (0, MAX_ACCEL_MM_S2]");
+static_assert(JOG_SOFT_LIMIT_BRAKE_RATIO > 0.0f && JOG_SOFT_LIMIT_BRAKE_RATIO < 0.7071f,
+              "soft limit braking must stay below the CoreXY worst-case axis deceleration");
 
 // ペン上げ/下げのサーボ角度 [deg]。
 // 決め方: 機構に合わせて、紙を擦らない上げ角と十分に接地する下げ角を実測する。

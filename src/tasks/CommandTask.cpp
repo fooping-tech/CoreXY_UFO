@@ -2,6 +2,8 @@
 #include "AppContext.h"
 #include "CommandDispatcher.h"
 #include "Core2PinMap.h"
+#include "JoystickMapping.h"
+#include <string.h>
 
 namespace {
 bool isLedCommand(CommandType type) {
@@ -51,7 +53,32 @@ void commandTask(void*) {
         if (length > 0) {
           CommandMessage command = CommandDispatcher::parse(line);
           if (command.type == CommandType::INVALID) {
-            logMessage("ERROR: %s", command.error);
+            if (strcmp(command.name, "JOG") == 0) {
+              logMessage("NACK_JOG reason=bad_args (%s)", command.error);
+            } else {
+              logMessage("ERROR: %s", command.error);
+            }
+          } else if (command.type == CommandType::JOG) {
+            // No ACK: 20 Hz refreshes would flood the 24-line LogQueue.
+            // motionTask reports JOG start/end and NACK_JOG.
+            JogRequest request;
+            request.vx_mm_s = command.jog_vx_mm_s;
+            request.vy_mm_s = command.jog_vy_mm_s;
+            request.z_counts_s = command.jog_z_counts_s;
+            request.arm_counts_s = command.jog_arm_counts_s;
+            request.time_ms = millis();
+            request.link = true;
+            xQueueOverwrite(serial_jog_queue, &request);
+          } else if (command.type == CommandType::STOP) {
+            // Takes effect at once like ABORT; the front slot makes motionTask
+            // handle it before commands queued earlier (which it discards).
+            requestMotionStop();
+            if (xQueueSendToFront(command_queue, &command, 0) != pdTRUE) {
+              markStopCommandLost();
+              logMessage("ACK STOP requested");
+            } else {
+              logMessage("ACK QUEUED STOP");
+            }
           } else if (command.type == CommandType::ABORT ||
                      command.type == CommandType::JOB_ABORT) {
             requestMotionAbort();

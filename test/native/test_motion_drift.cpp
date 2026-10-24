@@ -131,10 +131,55 @@ void testABStepsToXYDeltaInvertsForwardDelta() {
 
 }  // namespace
 
+void testStopRampDeceleratesWithinRemainingSteps() {
+  SegmentGenerator generator;
+  static SegmentQueue queue;
+  // 100 mm/s, 1000 mm/s^2 -> 5 mm stop distance, 100 mm left along +X.
+  const CoreXYDelta remaining = CoreXYKinematics::xyDeltaToABSteps(100.0f, 0.0f, STEPS_PER_MM);
+  require(generator.generateStop(remaining.a_steps, remaining.b_steps, 100.0f, 1000.0f, queue),
+          "stop ramp generated");
+  int32_t sum_a = 0;
+  int32_t sum_b = 0;
+  uint32_t total_us = 0;
+  float previous_speed = 1e9f;
+  MotionSegment segment{};
+  while (queue.dequeue(segment)) {
+    sum_a += segment.a_steps;
+    sum_b += segment.b_steps;
+    total_us += segment.duration_us;
+    const float speed = std::fabs(static_cast<float>(segment.a_steps)) /
+                        (segment.duration_us / 1e6f);
+    require(speed <= previous_speed + 1.0f, "stop ramp speed never increases");
+    previous_speed = speed;
+  }
+  const CoreXYDelta moved = CoreXYKinematics::abStepsToXYDelta(sum_a, sum_b, STEPS_PER_MM);
+  require(std::fabs(moved.dx_mm - 5.0f) < 0.05f && std::fabs(moved.dy_mm) < 0.02f,
+          "stop ramp travels v^2/2a along the block direction");
+  require(std::abs(static_cast<int>(total_us) - 100000) < 2000, "stop ramp lasts v/a");
+
+  // Only 2 mm left: the ramp must end exactly at the block end.
+  const CoreXYDelta short_left = CoreXYKinematics::xyDeltaToABSteps(2.0f, 1.0f, STEPS_PER_MM);
+  require(generator.generateStop(short_left.a_steps, short_left.b_steps, 100.0f, 1000.0f, queue),
+          "short stop ramp generated");
+  sum_a = 0;
+  sum_b = 0;
+  while (queue.dequeue(segment)) {
+    sum_a += segment.a_steps;
+    sum_b += segment.b_steps;
+  }
+  require(sum_a == short_left.a_steps && sum_b == short_left.b_steps,
+          "stop ramp never passes the remaining steps");
+
+  require(generator.generateStop(remaining.a_steps, remaining.b_steps, 0.0f, 1000.0f, queue) &&
+              queue.isEmpty(),
+          "zero speed means already stopped");
+}
+
 int main() {
   testAbsoluteStepClosedLoop();
   testSegmentGeneratorSumsToBlockSteps();
   testABStepsToXYDeltaInvertsForwardDelta();
+  testStopRampDeceleratesWithinRemainingSteps();
   std::cout << "native motion drift tests passed\n";
   return 0;
 }

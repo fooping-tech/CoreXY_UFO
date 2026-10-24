@@ -66,7 +66,7 @@ void joystickTask(void*) {
   char mac_text[18];
   JoystickLink::localMac(mac);
   formatMac(mac, mac_text);
-  logMessage("JOY ESP-NOW ready channel=%u core2_mac=%s (test mode only)",
+  logMessage("JOY ESP-NOW ready channel=%u core2_mac=%s",
              JOY_ESPNOW_CHANNEL, mac_text);
 
   const JoyMapConfig config = mapConfig();

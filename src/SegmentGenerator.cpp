@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <math.h>
+#include "CoreXYKinematics.h"
 #include "PlotterConfig.h"
 #include "SegmentQueue.h"
 
@@ -109,4 +110,60 @@ float SegmentGenerator::distanceAtTime(const MotionBlock& block,
          block.peak_speed_mm_s * deceleration_time_s -
          0.5f * block.acceleration_mm_s2 * deceleration_time_s *
              deceleration_time_s;
+}
+
+float SegmentGenerator::speedAtTime(const MotionBlock& block, float time_s) const {
+  if (time_s <= block.acceleration_time_s) {
+    return block.entry_speed_mm_s + block.acceleration_mm_s2 * max(0.0f, time_s);
+  }
+  const float cruise_end_time_s = block.acceleration_time_s + block.cruise_time_s;
+  if (time_s <= cruise_end_time_s) return block.peak_speed_mm_s;
+  const float speed_mm_s =
+      block.peak_speed_mm_s - block.acceleration_mm_s2 * (time_s - cruise_end_time_s);
+  return max(0.0f, speed_mm_s);
+}
+
+bool SegmentGenerator::generateStop(int32_t remaining_a_steps, int32_t remaining_b_steps,
+                                    float speed_mm_s, float accel_mm_s2,
+                                    SegmentQueue& queue) const {
+  queue.clear();
+  if (remaining_a_steps == 0 && remaining_b_steps == 0) return true;
+  if (!(speed_mm_s > 0.0f) || !(accel_mm_s2 > 0.0f)) return true;
+  const CoreXYDelta remaining =
+      CoreXYKinematics::abStepsToXYDelta(remaining_a_steps, remaining_b_steps, STEPS_PER_MM);
+  const float remaining_mm =
+      sqrtf(remaining.dx_mm * remaining.dx_mm + remaining.dy_mm * remaining.dy_mm);
+  if (remaining_mm <= 0.0f) return true;
+
+  const float stop_mm = speed_mm_s * speed_mm_s / (2.0f * accel_mm_s2);
+  const float ramp_mm = min(stop_mm, remaining_mm);
+  const float final_speed_mm_s =
+      sqrtf(max(0.0f, speed_mm_s * speed_mm_s - 2.0f * accel_mm_s2 * ramp_mm));
+  const float ramp_time_s = max(MIN_SEGMENT_TIME_S, (speed_mm_s - final_speed_mm_s) / accel_mm_s2);
+  size_t segment_count = static_cast<size_t>(ceilf(ramp_time_s / DEFAULT_SEGMENT_TIME_S));
+  if (segment_count == 0) segment_count = 1;
+  if (segment_count > SegmentQueue::CAPACITY) segment_count = SegmentQueue::CAPACITY;
+  const float segment_time_s = ramp_time_s / static_cast<float>(segment_count);
+
+  int32_t previous_a_steps = 0;
+  int32_t previous_b_steps = 0;
+  for (size_t index = 1; index <= segment_count; ++index) {
+    const float time_s = segment_time_s * static_cast<float>(index);
+    const float distance_mm =
+        index == segment_count
+            ? ramp_mm
+            : min(ramp_mm, speed_mm_s * time_s - 0.5f * accel_mm_s2 * time_s * time_s);
+    const float fraction = constrain(distance_mm / remaining_mm, 0.0f, 1.0f);
+    const int32_t cumulative_a_steps = lroundf(remaining_a_steps * fraction);
+    const int32_t cumulative_b_steps = lroundf(remaining_b_steps * fraction);
+    MotionSegment segment{};
+    segment.a_steps = cumulative_a_steps - previous_a_steps;
+    segment.b_steps = cumulative_b_steps - previous_b_steps;
+    segment.duration_us = static_cast<uint32_t>(max(1.0f, segment_time_s * 1000000.0f));
+    if (!segmentWithinMotorSpeedLimit(segment)) return false;
+    if (!queue.enqueue(segment)) return false;
+    previous_a_steps = cumulative_a_steps;
+    previous_b_steps = cumulative_b_steps;
+  }
+  return true;
 }

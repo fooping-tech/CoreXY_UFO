@@ -220,6 +220,7 @@ bool JobController::allowCommand(CommandType type, bool from_gcode) const {
     case CommandType::JOB_END:
     case CommandType::JOB_ABORT:
     case CommandType::ABORT:
+    case CommandType::STOP:
     case CommandType::JOB_STATUS:
     case CommandType::POS:
     case CommandType::PEN_STATUS:

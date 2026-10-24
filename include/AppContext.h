@@ -23,6 +23,9 @@ extern QueueHandle_t led_command_queue;
 // status copy for the joystick task (UI consumes status_queue).
 extern QueueHandle_t jog_queue;
 extern QueueHandle_t joystick_status_queue;
+// Serial JOG: latest JogRequest (Core 0 -> Core 1, 1-deep, overwrite). Kept out
+// of CommandQueue so 20 Hz JOG refreshes neither fill it nor flood the log.
+extern QueueHandle_t serial_jog_queue;
 extern MachineState machine_state;
 extern DiagnosticsState diagnostics_state;
 extern SafetyManager safety_manager;
@@ -40,6 +43,14 @@ extern JobController job_controller;
 void requestMotionAbort();
 bool isMotionAbortRequested();
 void clearMotionAbort();
+// STOP: decelerate the running XY move / jog without an alarm.
+void requestMotionStop();
+bool isMotionStopRequested();
+void clearMotionStop();
+// commandTask could not queue the STOP command (CommandQueue full); motionTask
+// then completes the STOP from the flag alone.
+void markStopCommandLost();
+bool takeStopCommandLost();
 void logMessage(const char* format, ...);
 void publishStatus();
 void uiTask(void*);

@@ -2573,7 +2573,7 @@ Z軸構想: 紐とドラム、ストローク800mm、荷重400g。STS3020(7.4V�
 - [x] XYジョグ速度を3000/600mm/min、加速度600mm/s^2へ変更(ユーザー要望)
 - [x] 速度4段階(SLOW 600 / FAST 3000 / VERY FAST 4500 / ULTRA 7500 mm/min)、プロトコルv2(ユーザー要望)
 - [ ] FAST/VERY FAST/ULTRAでの脱調・停止距離・リミット即停止時の衝撃を実機確認(ULTRAは高速スイープ確認範囲5000mm/minを超える)
-- [ ] ジョグ中にSerialコマンドを送ったときの`reason=serial_command`停止
+- [ ] ~~ジョグ中にSerialコマンドを送ったときの`reason=serial_command`停止~~ 2026-10-24に廃止(ジョグ中のSerialコマンドではセッションを終えない)
 
 未解決リスク:
 
@@ -2589,6 +2589,7 @@ Z軸構想: 紐とドラム、ストローク800mm、荷重400g。STS3020(7.4V�
 - [x] ソフトリミットをX 390 / Y 200mmへ(ユーザー指定)。WebUI SOFT_LIMIT、テキスト生成上限も同期
 - [ ] HOME後、XY 390 0 / XY 0 200 / XY 390 200 が機械端に当たらず到達できることを実機確認
 - リスク: テストモードのジョグには奥側の制限がない(スイッチなし)。ULTRA等の高速で奥へ行き過ぎると衝突する。
+  - 2026-10-24: HOMEDで始めたジョグはソフトリミット手前で減速停止するよう対策。HOMEDなしのジョグには引き続き奥側の制限がない。
 
 ## 2026-10-22: ジョイスティックのXYラグ対策
 
@@ -2602,3 +2603,38 @@ Z軸構想: 紐とドラム、ストローク800mm、荷重400g。STS3020(7.4V�
 - [x] 実機Serial: ID1 ±1/4・±1・±3回転、ID2 ±1/4・±1回転すべてPASS(3回転5.6s)
 - [ ] 負荷(Zドラム400g、アーム)付きで速度に追従できるか、温度、電流
 - [ ] ジョイスティックでの2400 counts/sジョグの操作感
+
+## 2026-10-24: Serial速度ジョグ`JOG`と非アラーム停止`STOP`(CoreXY_UFO_Game HANDOFF_FIRMWARE_JOG)
+
+依頼: https://github.com/fooping-tech/CoreXY_UFO_Game/blob/main/docs/HANDOFF_FIRMWARE_JOG.md
+仕様: SPEC.md「2026-10-24: Serial速度ジョグ`JOG`と非アラーム停止`STOP`」。手順: `tools/serial_tool/docs/jog-check.md`。
+
+- [x] `JOG`/`STOP`のparser、`SerialJogQueue`(長さ1上書き)、commandTaskでのSTOP即時フラグ+キュー先頭投入
+- [x] ジョグセッションをジョイスティック/Serial共通化。TEST_MODE不要、HOMED保持、ソフトリミット減速、ジョグ中の読み取り系即答・その他`NACK reason=jog_active`、Serial優先、`JOG_POS` 20Hz
+- [x] Serial JOGの受付判定(not_homed/alarm/homing/job_active/busy/bad_args、押下ごとに1回だけNACK、終了後のキー離し待ち)
+- [x] STOP: timed segmentの残りを減速ランプへ置換(`SegmentGenerator::generateStop`)、移動系キューの破棄、ジョブABORTED、`STOP complete`
+- [x] nativeテスト: 速度clamp、ソフトリミット速度(最悪減速度モデルの閉ループで390mmを越えない)、STOPランプ(距離v^2/2a、残りstepを越えない、速度単調減少)
+- [x] ビルド: m5stack-core2 / m5stack-core2-sim / m5stack-core2-hwtest SUCCESS
+- [x] 書き込み(m5stack-core2、/dev/cu.usbserial-5B1F0093251)
+- [x] 実機: SELFTEST PASS、`jog_check.csv` 全行OK(CONFIGのJOG行、HELP、待機中STOPで`STOP complete`・ALARM=NO)
+- [x] 実機: 受け入れ条件8(HOMEDなしの`JOG 50 0` → `NACK_JOG reason=not_homed`)PASS
+- [ ] 実機: 受け入れ条件1〜7、11(`jog_check.py`)。2026-10-24はTMC2209がUART無応答(connection=2、VM未投入とみられる)でHOMEが`reason=tmc_not_ready`となり未実行
+- [ ] 実機確認: ジョイスティック(受け入れ条件9、10)
+- [ ] CoreXY_UFO_Game側の`FakeFirmware`/`protocol.py`更新(ゲーム側リポジトリ)
+
+HANDOFF §7への回答(ゲーム側へ返す内容):
+
+1. HOMEDのまま速度ジョグ: 可。位置はbackendが実際に出したSTEP数から計算しており、XY移動と同じくオープンループ。脱調しない限り正確。速度上限は`MAX_FEED_MM_MIN`(高速スイープ確認範囲は5000mm/minまで、ULTRA 7500は未確認)。加速度600mm/s^2は通常XY(1000)より低い。脱調が出たら速度上限を下げる。
+2. STOP後の位置: 正確。停止位置はプランナーの計画値ではなくbackendのステップ数から求め、プランナー/segmentキューは破棄するので、次の`XY`は実位置から計画される。
+3. TEST_MODEの役割: サーボの保持チェック等は`beginJog`/`updateJog`内でジョグ開始ごとに実施済み(テストモードとは独立)なので代替不要。ジョイスティックの「本番で使わない」前提は、ジョブ中は拒否・Serial JOG優先・ジョグ中のSerial移動コマンドは拒否、で置き換えた。
+4. 読み取り系の即答: motionTask(Core 1)のジョグループ内で処理する方式。`machine_state`はmotionTaskだけが読み書きするため排他不要。ループ周期20msなので応答遅れは最大約20ms(CONFIG等の長い出力は除く)。
+5. 同時入力: Serial優先。ジョイスティックのセッション中にSerial `JOG`が来たら切り替え、以後そのセッションではジョイスティック入力を無視。
+
+未解決リスク:
+
+- STOPはbackend(FastAccelStepper)のキューに入っている分を実行してから減速を始めるため、停止距離はキュー深さ分長くなる(高速時に要実測)。
+- JOGのソフトリミット減速は最悪減速度モデルで検証したが、実機の停止位置(390/200の手前の余裕)は未測定。
+- ジョグ中のTMC_STATUSはUART読出しでジョグループが数ms止まる。デッドマン250msには十分小さいが未測定。
+- `JOG_POS`(20Hz)とPOS(10Hz)を同時に流した時のLogQueue/USB帯域は計算上約35%で未測定。
+- ジョイスティックがTEST_MODEなしで動くため、ゲーム中にAtomを触ると動き出す。Serial JOGセッション中とジョブ中は無視されるが、ゲーム側の待機中は動く。不要なら`JOYSTICK_ENABLED=false`。
+
