@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  native-tests:
+    name: Native tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh tools/run_native_motion_tests.sh
+
+  python-tests:
+    name: Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: tools/*/requirements.txt
+      - run: |
+          pip install -r tools/serial_tool/requirements.txt -r tools/qr_tool/requirements.txt \
+            -r tools/webui/requirements.txt pytest
+      - run: python -m pytest -q tests tools/webui
+
+  build:
+    name: Build ${{ matrix.env }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env:
+          - m5stack-core2
+          - m5stack-core2-sim
+          - m5stack-core2-hwtest
+          - m5stack-core2-sts3020-test
+          - atoms3-joystick
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .pio/libdeps
+          key: pio-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-${{ matrix.env }}-
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install platformio
+      - run: pio run -e ${{ matrix.env }}
