@@ -22,6 +22,7 @@ JoyMapConfig mapConfig() {
   config.feed_mm_min[JOY_SPEED_FAST] = JOY_FAST_FEED_MM_MIN;
   config.feed_mm_min[JOY_SPEED_VERY_FAST] = JOY_VERY_FAST_FEED_MM_MIN;
   config.feed_mm_min[JOY_SPEED_ULTRA] = JOY_ULTRA_FEED_MM_MIN;
+  config.feed_mm_min[JOY_SPEED_MAX] = JOY_MAX_FEED_MM_MIN;
   config.servo_max_counts_s = JOY_SERVO_MAX_COUNTS_S;
   config.z_sign = JOY_Z_SIGN;
   config.arm_sign = JOY_ARM_SIGN;
@@ -50,6 +51,8 @@ void sendStatus(const StatusMessage& status, uint16_t ack_seq) {
   if (machine.homed) packet.flags |= JOY_STATUS_HOMED;
   if (machine.joystick_jog_active) packet.flags |= JOY_STATUS_JOG_ACTIVE;
   if (machine.tmc_ready) packet.flags |= JOY_STATUS_TMC_READY;
+  if (machine.homing_active) packet.flags |= JOY_STATUS_HOMING;
+  if (machine.jog_unhomed) packet.flags |= JOY_STATUS_UNHOMED_JOG;
   snprintf(packet.last_result, sizeof(packet.last_result), "%s",
            machine.joystick_last_event);
   joystick_link.sendStatus(packet);
@@ -74,7 +77,7 @@ void joystickTask(void*) {
   bool was_linked = false;
   bool have_baseline = false;
   uint8_t last_estop = 0;
-  uint8_t last_toggle = 0;
+  uint8_t last_home = 0;
   uint8_t last_alarm_clear = 0;
   uint32_t last_status_ms = 0;
   TickType_t wake = xTaskGetTickCount();
@@ -90,20 +93,17 @@ void joystickTask(void*) {
         joystick_link.latest(packet, age_ms) && age_ms <= JOY_LINK_TIMEOUT_MS;
     JogRequest request;
     if (linked) {
-      request = joyMapAxes(packet.axes, packet.flags & JOY_FLAG_SPEED_MASK, config);
+      request = joyMapAxes(packet.axes, joySpeedLevel(packet.flags), config);
       // Counters seen first after (re)link are the baseline, not presses:
       // an Atom reboot resets them and must not trigger an action.
       if (have_baseline) {
         if (packet.estop_count != last_estop) queueButtonCommand("ABORT");
-        if (packet.test_mode_toggle_count != last_toggle) {
-          queueButtonCommand(status.machine.test_mode_active ? "TEST_MODE OFF"
-                                                             : "TEST_MODE ON");
-        }
+        if (packet.home_count != last_home) queueButtonCommand("HOME");
         if (packet.alarm_clear_count != last_alarm_clear) queueButtonCommand("ALARM_CLEAR");
       }
       have_baseline = true;
       last_estop = packet.estop_count;
-      last_toggle = packet.test_mode_toggle_count;
+      last_home = packet.home_count;
       last_alarm_clear = packet.alarm_clear_count;
     }
     request.link = linked;

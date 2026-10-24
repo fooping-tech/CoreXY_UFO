@@ -8,7 +8,9 @@
 // any change.
 
 constexpr uint32_t JOY_PROTOCOL_MAGIC = 0x4A4F4655;  // bytes "UFOJ"
-constexpr uint8_t JOY_PROTOCOL_VERSION = 3;  // v3: status carries X/Y position
+// v3: status carries X/Y position. v4: 5 speed levels (3-bit field, MAX added),
+// left button = HOME (was TEST_MODE toggle), status HOMING / UNHOMED_JOG flags.
+constexpr uint8_t JOY_PROTOCOL_VERSION = 4;
 constexpr int16_t JOY_AXIS_FULL_SCALE = 1000;
 // Wi-Fi channel used by both sides (no access point is joined).
 constexpr uint8_t JOY_ESPNOW_CHANNEL = 1;
@@ -21,23 +23,31 @@ enum JoyAxisIndex : uint8_t {
   JOY_AXIS_COUNT = 4,
 };
 
-// JoyCommandPacket::flags bits 0-1: XY speed level (left stick press cycles
-// SLOW -> FAST -> VERY_FAST -> ULTRA -> SLOW).
+// JoyCommandPacket::flags bits 0-2: XY speed level (left stick press cycles
+// SLOW -> FAST -> VERY_FAST -> ULTRA -> MAX -> SLOW).
 enum JoySpeedLevel : uint8_t {
   JOY_SPEED_SLOW = 0,
   JOY_SPEED_FAST = 1,
   JOY_SPEED_VERY_FAST = 2,
   JOY_SPEED_ULTRA = 3,
-  JOY_SPEED_LEVEL_COUNT = 4,
+  JOY_SPEED_MAX = 4,
+  JOY_SPEED_LEVEL_COUNT = 5,
 };
-constexpr uint8_t JOY_FLAG_SPEED_MASK = 0x03;
+constexpr uint8_t JOY_FLAG_SPEED_MASK = 0x07;
+
+// Speed level from packet flags; out-of-range values count as the top level.
+inline uint8_t joySpeedLevel(uint8_t flags) {
+  const uint8_t level = flags & JOY_FLAG_SPEED_MASK;
+  return level < JOY_SPEED_LEVEL_COUNT ? level : JOY_SPEED_LEVEL_COUNT - 1;
+}
 
 inline const char* joySpeedLevelName(uint8_t level) {
-  switch (level & JOY_FLAG_SPEED_MASK) {
+  switch (joySpeedLevel(level)) {
     case JOY_SPEED_SLOW: return "SLOW";
     case JOY_SPEED_FAST: return "FAST";
     case JOY_SPEED_VERY_FAST: return "VERY FAST";
-    default: return "ULTRA";
+    case JOY_SPEED_ULTRA: return "ULTRA";
+    default: return "MAX";
   }
 }
 
@@ -52,7 +62,7 @@ struct __attribute__((packed)) JoyCommandPacket {
   uint16_t seq;
   int16_t axes[JOY_AXIS_COUNT];  // -1000..1000 after centering and deadzone
   uint8_t estop_count;
-  uint8_t test_mode_toggle_count;
+  uint8_t home_count;  // left button long press -> HOME
   uint8_t alarm_clear_count;
   uint8_t reserved;
   uint16_t battery_mv;
@@ -65,6 +75,9 @@ constexpr uint8_t JOY_STATUS_ALARM = 0x02;
 constexpr uint8_t JOY_STATUS_HOMED = 0x04;
 constexpr uint8_t JOY_STATUS_JOG_ACTIVE = 0x08;
 constexpr uint8_t JOY_STATUS_TMC_READY = 0x10;
+constexpr uint8_t JOY_STATUS_HOMING = 0x20;
+// Jog without HOME: XY is slow and has no soft limit.
+constexpr uint8_t JOY_STATUS_UNHOMED_JOG = 0x40;
 
 // Core2 -> Atom, sent at 10 Hz to the paired Atom.
 struct __attribute__((packed)) JoyStatusPacket {

@@ -21,11 +21,12 @@ Atomは**スティックを離した状態で電源ON**(中央値の校正)。LC
 | 右スティック 上下 | Z(サーボID1) |
 | 右スティック 左右 | アーム(サーボID2) |
 | 右ボタン | 非常停止(ABORT。ALARMになりHOMED解除) |
-| 左ボタン 1秒長押し | テストモード ON / OFF(ジョグには不要。TEST_JOG/SERVO_TURN等用) |
+| 左ボタン 1秒長押し | HOME(長押し中は画面下に進行バー) |
 | 画面ボタン 1秒長押し | ALARM_CLEAR |
-| 左スティック押し込み | 速度切替 SLOW(600)→FAST(3000)→VERY FAST(4500)→ULTRA(7500 mm/min)→SLOW。起動時はFAST |
+| 左スティック押し込み | 速度切替 SLOW(600)→FAST(3000)→VERY FAST(4500)→ULTRA(7500)→MAX(12000 mm/min)→SLOW。起動時はFAST |
 
-AtomのLCD: Link、TEST、ALARM、JOG、SPD(速度段階、VERY FAST以上は橙)、電池、各軸の値(-1000..1000)、直前のイベント。
+AtomのLCD: 上部に状態(NO LINK/ALARM/HOMING/SLOW JOG/JOG/NEED HOME/READY)と電池、中央にX/Y(HOME前は灰色)、速度名と5段バー、左右スティックの位置、下段に長押しの進行バー・直前のイベント・操作ヒント。
+プロトコルv4: Core2とAtomの両方を同じ版で書き込むこと(版違いはリンクしない)。
 
 ## 安全仕様
 
@@ -43,16 +44,18 @@ AtomのLCD: Link、TEST、ALARM、JOG、SPD(速度段階、VERY FAST以上は橙
 
 1. Core2の`CONFIG`で`JOY enabled=1 ready=1 core2_mac=... atom_mac=...`、`POS`で`JOY=LINK`
 2. テストモードOFFのまま左スティックを倒す → 動く(`JOG start ... src=JOY`)
-3. HOMEせずにULTRAでXYを倒す → 遅い(600mm/min)、Core2に`SLOW JOG`と警告帯、開始2音と移動中のビープ
-4. `HOME`後にジョグ → 表示・音なし、終了後も`HOMED=YES`。X 390 / Y 200へ向けて倒し続けると手前で止まる
-5. 各軸の向きを確認(LCDの値: 右/上で+になるか。逆なら`AtomJoyMain.cpp`の`AXIS_SIGN`)
-6. 左スティック: XYが倒している間動き、離すと止まる(`JOG start` / `JOG end reason=idle`)
-7. XY移動中にXスイッチを手で押す → 即停止(`reason=limit_x`)。押したまま-X → 動かない
-8. 右スティック上下でZ、左右でアームが回り、離すと保持する(回転方向が逆なら`JOY_Z_SIGN`/`JOY_ARM_SIGN`)
-9. ジョグ中にAtomの電源を切る → 250ms以内に停止(`reason=link_lost`)
-10. ジョグ中に右ボタン → 停止、`ALARM`。画面ボタン長押しで解除
-11. ジョグ中にSerialから`POS`を10Hzで送る → ジョグは続き、`POS ... MOTION=YES`が毎回返る
-12. ジョグ中にSerialから`STOP` → 減速停止(`reason=command`)、`STOP complete`、アラームなし
+3. 左ボタンを1秒長押し → 進行バーの後に`JOY button: HOME`、LCDが`HOMING`→`READY`
+4. 左スティック押し込みで速度がSLOW→FAST→VERY FAST→ULTRA→MAX→SLOWと切り替わり、バーの段数と色が変わる
+5. HOMEせずにULTRAでXYを倒す → 遅い(600mm/min)、Core2に`SLOW JOG`と警告帯、開始2音と移動中のビープ
+6. `HOME`後にジョグ → 表示・音なし、終了後も`HOMED=YES`。X 390 / Y 200へ向けて倒し続けると手前で止まる
+7. 各軸の向きを確認(LCDの値: 右/上で+になるか。逆なら`AtomJoyMain.cpp`の`AXIS_SIGN`)
+8. 左スティック: XYが倒している間動き、離すと止まる(`JOG start` / `JOG end reason=idle`)
+9. XY移動中にXスイッチを手で押す → 即停止(`reason=limit_x`)。押したまま-X → 動かない
+10. 右スティック上下でZ、左右でアームが回り、離すと保持する(回転方向が逆なら`JOY_Z_SIGN`/`JOY_ARM_SIGN`)
+11. ジョグ中にAtomの電源を切る → 250ms以内に停止(`reason=link_lost`)
+12. ジョグ中に右ボタン → 停止、`ALARM`。画面ボタン長押しで解除
+13. ジョグ中にSerialから`POS`を10Hzで送る → ジョグは続き、`POS ... MOTION=YES`が毎回返る
+14. ジョグ中にSerialから`STOP` → 減速停止(`reason=command`)、`STOP complete`、アラームなし
 
 ## Serial CSV
 

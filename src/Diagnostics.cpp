@@ -70,10 +70,10 @@ void Diagnostics::printConfig() {
       joystick_link.pairedMac(mac);
       formatMac(mac, atom_mac);
     }
-    logMessage("JOY enabled=%u ready=%u channel=%u core2_mac=%s atom_mac=%s feed=%.0f/%.0f/%.0f/%.0f servo=%ld",
+    logMessage("JOY enabled=%u ready=%u channel=%u core2_mac=%s atom_mac=%s feed=%.0f/%.0f/%.0f/%.0f/%.0f servo=%ld",
                JOYSTICK_ENABLED, joystick_link.ready(), JOY_ESPNOW_CHANNEL, core2_mac,
                atom_mac, JOY_SLOW_FEED_MM_MIN, JOY_FAST_FEED_MM_MIN,
-               JOY_VERY_FAST_FEED_MM_MIN, JOY_ULTRA_FEED_MM_MIN,
+               JOY_VERY_FAST_FEED_MM_MIN, JOY_ULTRA_FEED_MM_MIN, JOY_MAX_FEED_MM_MIN,
                static_cast<long>(JOY_SERVO_MAX_COUNTS_S));
   }
   logMessage("JOB_END park_enabled=%u park=(%.3f,%.3f) park_feed=%.3f jingle_enabled=%u",

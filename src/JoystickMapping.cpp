@@ -16,7 +16,7 @@ float joyShapeAxis(int16_t axis, float deadzone) {
 JogRequest joyMapAxes(const int16_t axes[4], uint8_t speed_level,
                       const JoyMapConfig& config) {
   JogRequest request;
-  const float feed_mm_s = config.feed_mm_min[speed_level & JOY_FLAG_SPEED_MASK] / 60.0f;
+  const float feed_mm_s = config.feed_mm_min[joySpeedLevel(speed_level)] / 60.0f;
   request.vx_mm_s = joyShapeAxis(axes[JOY_AXIS_LEFT_X], config.deadzone) * feed_mm_s;
   request.vy_mm_s = joyShapeAxis(axes[JOY_AXIS_LEFT_Y], config.deadzone) * feed_mm_s;
   // Keep the combined XY speed within the feed limit on diagonals.

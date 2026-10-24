@@ -41,8 +41,13 @@ void testMapAxes() {
   require(std::fabs(very_fast.vx_mm_s - 75.0f) < 1e-3f, "very fast +X = 4500 mm/min");
   JogRequest ultra = joyMapAxes(right, JOY_SPEED_ULTRA, config);
   require(std::fabs(ultra.vx_mm_s - 125.0f) < 1e-3f, "ultra +X = 7500 mm/min");
+  JogRequest max_level = joyMapAxes(right, JOY_SPEED_MAX, config);
+  require(std::fabs(max_level.vx_mm_s - 200.0f) < 1e-3f, "max +X = 12000 mm/min");
   JogRequest masked = joyMapAxes(right, 0xFF, config);
-  require(std::fabs(masked.vx_mm_s - 125.0f) < 1e-3f, "speed level uses only the low 2 bits");
+  require(std::fabs(masked.vx_mm_s - 200.0f) < 1e-3f,
+          "out-of-range speed level counts as the top level");
+  require(joySpeedLevel(0x04) == JOY_SPEED_MAX && joySpeedLevel(0x0B) == JOY_SPEED_ULTRA,
+          "speed level uses only the low 3 bits");
 
   const int16_t diagonal[4] = {1000, 1000, 0, 0};
   JogRequest diag = joyMapAxes(diagonal, JOY_SPEED_FAST, config);

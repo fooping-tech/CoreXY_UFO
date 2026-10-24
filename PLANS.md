@@ -2653,3 +2653,17 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 
 - スピーカー(I2S、DMA)有効化がステップ生成・LCD・UARTに与える影響は未測定。問題が出たら`UI_SOUND_ENABLED=false`。
 - 音量96/255の聞こえ方は未確認。
+
+## 2026-10-24: Atom JoyStick 速度MAX、左ボタンでHOME、LCD刷新(プロトコルv4、ユーザー要望)
+
+- [x] 速度5段階目MAX 12000mm/min(プロトコルv4、3bit速度フィールド、範囲外は最上段)。nativeテスト追加
+- [x] 左ボタン1秒長押し=HOME(TEST_MODE切替を廃止)、状態にHOMING/UNHOMED_JOGフラグ
+- [x] Atom LCD刷新(状態チップ、電池、X/Y、速度バー、スティック表示、長押し進行バー)
+- [x] ビルド(m5stack-core2 / atoms3-joystick)、Core2書き込み、SELFTEST PASS、CONFIGに`feed=.../12000`
+- [ ] Atom書き込み(USBでMacから見えず未実施。v4同士でないとリンクしない)
+- [ ] 実機: MAXでの脱調・停止距離、左ボタン長押しでHOME、LCDの見え方
+
+未解決リスク:
+
+- MAX 12000mm/minは実機で確認した高速範囲(5000mm/min)を大きく超える。脱調したら`JOY_MAX_FEED_MM_MIN`を下げる。
+- Atomから機械が動くHOMEを起動できるようになった。1秒長押しが必要で、ジョブ中・alarm中はCore2側で拒否される。
