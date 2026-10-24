@@ -20,7 +20,9 @@ constexpr uint16_t LED_COMMAND_QUEUE_LENGTH = 12;
 constexpr uint16_t STACK_UI = 6144;
 constexpr uint16_t STACK_COMMAND = 4096;
 constexpr uint16_t STACK_LOG = 3072;
-constexpr uint16_t STACK_MOTION = 6144;
+// 2026-10-24: 6144 -> 8192. The jog session now answers read-only commands
+// (CONFIG/POS/...) inside its loop, which nests deeper on this stack.
+constexpr uint16_t STACK_MOTION = 8192;
 constexpr uint16_t STACK_STEPPER_FEED = 2048;
 constexpr uint16_t STACK_TMC = 2048;
 constexpr uint16_t STACK_SAFETY = 2048;

@@ -13,6 +13,7 @@
 #include "PlannerQueue.h"
 #include "SegmentGenerator.h"
 #include "SegmentQueue.h"
+#include "TaskConfig.h"
 #include "TrapezoidPlanner.h"
 
 namespace {
@@ -163,11 +164,128 @@ bool stopForAbort(const char* context) {
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// Command classes (jog session / STOP)
+// ---------------------------------------------------------------------------
+// Answered at once even during a jog session.
+bool isReadOnlyCommand(const CommandMessage& command) {
+  switch (command.type) {
+    case CommandType::HELP:
+    case CommandType::CONFIG:
+    case CommandType::POS:
+    case CommandType::PEN_STATUS:
+    case CommandType::SERVO_STATUS:
+    case CommandType::HOME_STATUS:
+    case CommandType::LIMIT_STATUS:
+    case CommandType::TMC_STATUS:
+    case CommandType::JOB_STATUS:
+      return true;
+    case CommandType::GCODE:
+      return command.gcode.type == ParsedGcodeType::M114;
+    default:
+      return false;
+  }
+}
+
+// Commands that move something or change the motion state. STOP discards
+// the ones queued before it.
+bool isMotionCommand(const CommandMessage& command) {
+  switch (command.type) {
+    case CommandType::XY:
+    case CommandType::AB_TIMED:
+    case CommandType::TEST_A:
+    case CommandType::TEST_B:
+    case CommandType::TEST_JOG:
+    case CommandType::SERVO_ANGLE:
+    case CommandType::SERVO_TURN:
+    case CommandType::HOME:
+    case CommandType::HOME_X:
+    case CommandType::HOME_Y:
+    case CommandType::DWELL:
+    case CommandType::MELODY:
+    case CommandType::JOB_BEGIN:
+    case CommandType::JOB_END:
+    case CommandType::PEN_UP:
+    case CommandType::PEN_DOWN:
+    case CommandType::ZERO:
+      return true;
+    case CommandType::GCODE:
+      return command.gcode.type != ParsedGcodeType::M114;
+    default:
+      return false;
+  }
+}
+
+// NACK_XY keeps its target field; other commands get NACK_<name>.
+void logCommandNack(const CommandMessage& command, const char* reason) {
+  if (command.type == CommandType::XY) {
+    logMessage("NACK_XY target=(%.3f,%.3f) reason=%s", command.x_mm, command.y_mm, reason);
+  } else {
+    logMessage("NACK_%s reason=%s", command.name, reason);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Serial JOG admission
+// ---------------------------------------------------------------------------
+// The host refreshes JOG at 20 Hz while a key is held. A rejected press gets
+// one NACK_JOG and the rest of that press is ignored until JOG 0 0 or a gap
+// longer than SERIAL_JOG_TIMEOUT_MS (key released), so a held key never
+// starts moving later on its own (e.g. after an XY move or HOME finishes).
+struct SerialJogGate {
+  bool rejected = false;
+  uint32_t last_ms = 0;
+};
+SerialJogGate serial_jog_gate;
+
+bool receiveSerialJog(JogRequest& request) {
+  return serial_jog_queue != nullptr &&
+         xQueueReceive(serial_jog_queue, &request, 0) == pdTRUE;
+}
+
+bool serialJogStale(const JogRequest& request) {
+  return millis() - request.time_ms > SERIAL_JOG_TIMEOUT_MS;
+}
+
+// true: this request belongs to an already rejected press.
+bool serialJogHeldAfterReject(const JogRequest& request) {
+  if (!serial_jog_gate.rejected) return false;
+  const bool released = jogRequestIsZero(request) ||
+                        request.time_ms - serial_jog_gate.last_ms > SERIAL_JOG_TIMEOUT_MS;
+  serial_jog_gate.last_ms = request.time_ms;
+  if (released) serial_jog_gate.rejected = false;
+  return !released;
+}
+
+void rejectSerialJog(const JogRequest& request, const char* reason) {
+  serial_jog_gate.rejected = true;
+  serial_jog_gate.last_ms = request.time_ms;
+  logMessage("NACK_JOG reason=%s", reason);
+}
+
+const char* motionBusyReason() {
+  if (job_controller.isActive() || job_controller.isRunning()) return "job_active";
+  if (machine_state.homing_active) return "homing";
+  return "busy";
+}
+
+// Called while (or right after) motionTask is busy with another motion.
+void rejectSerialJogWhileBusy(const char* reason) {
+  JogRequest request;
+  if (!receiveSerialJog(request)) return;
+  if (serialJogHeldAfterReject(request) || jogRequestIsZero(request) ||
+      serialJogStale(request)) {
+    return;
+  }
+  rejectSerialJog(request, reason);
+}
+
 bool waitForMotionOrLimit(const MotionSyncReference& reference) {
   while (stepper_backend.isRunning()) {
     if (stopForAbort("Motion stopped")) {
       return false;
     }
+    rejectSerialJogWhileBusy(motionBusyReason());
     updateMachinePositionEstimateFromBackend(reference);
     safety_manager.poll();
     if (safety_manager.isAlarmed()) {
@@ -214,6 +332,7 @@ bool queueTimedSegmentWithRetry(const MotionSegment& segment, bool start,
                                    "Motion stopped while queueing segment");
       return false;
     }
+    rejectSerialJogWhileBusy(motionBusyReason());
     safety_manager.poll();
     if (safety_manager.isAlarmed()) {
       stepper_backend.stop();
@@ -226,30 +345,61 @@ bool queueTimedSegmentWithRetry(const MotionSegment& segment, bool start,
   }
 }
 
-bool executeTimedSegments(SegmentQueue& queue) {
+enum class XYRunResult {
+  COMPLETED,
+  STOPPED,  // STOP: decelerated; position is exact from the backend steps
+  FAILED,
+};
+
+// Feeds the block's segments to the backend. On STOP the not yet queued part
+// is replaced by a deceleration ramp that starts where the queued segments
+// end, so the stop is smooth and the final step position stays known.
+XYRunResult executeTimedSegments(SegmentQueue& queue, const MotionBlock& block) {
   if (stopForAbort("Motion stopped before timed segment start")) {
-    return false;
+    return XYRunResult::FAILED;
   }
+  if (isMotionStopRequested()) return XYRunResult::STOPPED;
   const MotionSyncReference reference = captureMotionSyncReference();
   MotionSegment segment{};
-  if (!queue.dequeue(segment)) return false;
-  if (!queueTimedSegmentWithRetry(segment, false, reference)) return false;
-  if (!stepper_backend.startTimedSegments()) return false;
+  if (!queue.dequeue(segment)) return XYRunResult::FAILED;
+  if (!queueTimedSegmentWithRetry(segment, false, reference)) return XYRunResult::FAILED;
+  if (!stepper_backend.startTimedSegments()) return XYRunResult::FAILED;
   setMotionActive(true);
+  int32_t queued_a_steps = segment.a_steps;
+  int32_t queued_b_steps = segment.b_steps;
+  float queued_time_s = static_cast<float>(segment.duration_us) / 1000000.0f;
+  bool stopping = false;
 
-  while (queue.dequeue(segment)) {
+  for (;;) {
+    if (!stopping && isMotionStopRequested()) {
+      stopping = true;
+      const float speed_mm_s = segment_generator.speedAtTime(block, queued_time_s);
+      if (!segment_generator.generateStop(block.a_steps - queued_a_steps,
+                                          block.b_steps - queued_b_steps, speed_mm_s,
+                                          block.acceleration_mm_s2, queue)) {
+        queue.clear();
+        logMessage("WARN: STOP ramp rejected; stopping at the queued segments");
+      }
+      logMessage("STOP decel speed=%.1f accel=%.0f segments=%u", speed_mm_s,
+                 block.acceleration_mm_s2, static_cast<unsigned>(queue.count()));
+    }
+    if (!queue.dequeue(segment)) break;
     if (stopForAbort("Motion stopped during timed segment queueing")) {
       setMotionActive(false);
-      return false;
+      return XYRunResult::FAILED;
     }
     if (!queueTimedSegmentWithRetry(segment, true, reference)) {
       setMotionActive(false);
-      return false;
+      return XYRunResult::FAILED;
     }
+    queued_a_steps += segment.a_steps;
+    queued_b_steps += segment.b_steps;
+    queued_time_s += static_cast<float>(segment.duration_us) / 1000000.0f;
   }
   const bool completed = waitForMotionOrLimit(reference);
   setMotionActive(false);
-  return completed;
+  if (!completed) return XYRunResult::FAILED;
+  return stopping ? XYRunResult::STOPPED : XYRunResult::COMPLETED;
 }
 
 void stashPendingCommand(const CommandMessage& command) {
@@ -507,7 +657,7 @@ bool planQueuedBlocks() {
   return true;
 }
 
-bool executePlannedBlock(MotionBlock& block, size_t index, size_t count) {
+XYRunResult executePlannedBlock(MotionBlock& block, size_t index, size_t count) {
   logMessage("XY batch=%u/%u current=(%.3f,%.3f) target=(%.3f,%.3f) dx=%.3f dy=%.3f A=%ld B=%ld F=%.3f entry=%.3f exit=%.3f",
              static_cast<unsigned>(index + 1), static_cast<unsigned>(count),
              block.start_x_mm, block.start_y_mm, block.target_x_mm,
@@ -526,13 +676,18 @@ bool executePlannedBlock(MotionBlock& block, size_t index, size_t count) {
     logMessage("ERROR: segment generator rejected XY move");
     logMessage("NACK_XY target=(%.3f,%.3f) reason=segment",
                block.target_x_mm, block.target_y_mm);
-    return false;
+    return XYRunResult::FAILED;
   }
   logMessage("SEGMENTS count=%u duration=%.3f dda=YES",
              static_cast<unsigned>(segment_queue.count()),
              block.acceleration_time_s + block.cruise_time_s +
                  block.deceleration_time_s);
 #if SIMULATION_MODE
+  if (isMotionStopRequested()) {
+    logMessage("NACK_XY target=(%.3f,%.3f) reason=stopped X=%.3f Y=%.3f",
+               block.target_x_mm, block.target_y_mm, machine_state.x_mm, machine_state.y_mm);
+    return XYRunResult::STOPPED;
+  }
   logMessage("SIMULATION_MODE: no motor output");
   logMessage("ACK_XY target=(%.3f,%.3f) A=%ld B=%ld F=%.3f",
              block.target_x_mm, block.target_y_mm, block.a_steps,
@@ -554,9 +709,15 @@ bool executePlannedBlock(MotionBlock& block, size_t index, size_t count) {
   safety_manager.beginNormalMoveLimitReleaseAllowance(
       allow_x_limit_release, allow_y_limit_release, block.start_x_mm,
       block.start_y_mm);
-  const bool executed = executeTimedSegments(segment_queue);
+  const XYRunResult executed = executeTimedSegments(segment_queue, block);
   safety_manager.clearNormalMoveLimitReleaseAllowance();
-  if (!executed) {
+  if (executed == XYRunResult::STOPPED) {
+    // machine_state already holds the backend position where the ramp ended.
+    logMessage("NACK_XY target=(%.3f,%.3f) reason=stopped X=%.3f Y=%.3f",
+               block.target_x_mm, block.target_y_mm, machine_state.x_mm, machine_state.y_mm);
+    return XYRunResult::STOPPED;
+  }
+  if (executed != XYRunResult::COMPLETED) {
     const char* alarm_reason = safety_manager.alarmReason();
     if (safety_manager.isAlarmed()) {
       const bool abort_alarm =
@@ -571,7 +732,7 @@ bool executePlannedBlock(MotionBlock& block, size_t index, size_t count) {
       logMessage("NACK_XY target=(%.3f,%.3f) reason=backend",
                  block.target_x_mm, block.target_y_mm);
     }
-    return false;
+    return XYRunResult::FAILED;
   }
   logMessage("ACK_XY target=(%.3f,%.3f) A=%ld B=%ld F=%.3f",
              block.target_x_mm, block.target_y_mm, block.a_steps,
@@ -582,7 +743,16 @@ bool executePlannedBlock(MotionBlock& block, size_t index, size_t count) {
   machine_state.a_steps = block.target_a_steps;
   machine_state.b_steps = block.target_b_steps;
   machine_state.feed_mm_min = block.nominal_speed_mm_min;
-  return true;
+  return XYRunResult::COMPLETED;
+}
+
+void nackPlannedBlocksStopped(size_t first_index) {
+  for (size_t index = first_index; index < planner_queue.count(); ++index) {
+    const MotionBlock* block = planner_queue.at(index);
+    if (block == nullptr) continue;
+    logMessage("NACK_XY target=(%.3f,%.3f) reason=stopped", block->target_x_mm,
+               block->target_y_mm);
+  }
 }
 
 bool handleXYBatch(const CommandMessage& first_command) {
@@ -694,9 +864,24 @@ bool handleXYBatch(const CommandMessage& first_command) {
                                        : LedStatus::DRAWING_PEN_UP);
   const size_t planned_count = planner_queue.count();
   for (size_t index = 0; index < planned_count; ++index) {
+    if (isMotionStopRequested()) {
+      nackPlannedBlocksStopped(index);
+      clearMotionQueues("XY stopped");
+      postLedStatus(LedStatus::IDLE);
+      return false;
+    }
     MotionBlock* planned_block = planner_queue.at(index);
-    if (planned_block == nullptr ||
-        !executePlannedBlock(*planned_block, index, planned_count)) {
+    const XYRunResult result =
+        planned_block == nullptr ? XYRunResult::FAILED
+                                 : executePlannedBlock(*planned_block, index, planned_count);
+    if (result == XYRunResult::STOPPED) {
+      nackPlannedBlocksStopped(index + 1);
+      warnIfDriftDetected();
+      clearMotionQueues("XY stopped");
+      postLedStatus(LedStatus::IDLE);
+      return false;
+    }
+    if (result != XYRunResult::COMPLETED) {
       postLedStatus(safety_manager.isAlarmed() ? LedStatus::ERROR
                                                : LedStatus::WARNING);
       clearMotionQueues("XY execution failed");
@@ -939,12 +1124,20 @@ const char* runTestMotion(int32_t a_steps, int32_t b_steps, float feed_mm_min,
   }
   setMotionActive(true);
   const char* result = "DONE";
+  bool stop_sent = false;
   while (stepper_backend.isRunning()) {
     if (stopForAbort("Test motion stopped")) {
       snprintf(detail, detail_size, "reason=abort");
       result = "STOPPED";
       break;
     }
+    if (!stop_sent && isMotionStopRequested()) {
+      stepper_backend.stopVelocity();  // decelerate (ramp move)
+      stop_sent = true;
+      snprintf(detail, detail_size, "reason=stop");
+      result = "STOPPED";
+    }
+    rejectSerialJogWhileBusy(motionBusyReason());
     updateMachinePositionEstimateFromBackend(reference);
     safety_manager.poll();
     const bool x_hit = !x_active_at_start && (safety_manager.xLimitActive() ||
@@ -1070,13 +1263,140 @@ void handleServoMove(const CommandMessage& command) {
              command.servo_value, stsMoveResultName(result), detail);
 }
 
+void handlePenStatus() {
+  if (!PEN_SERVO_ENABLED) {
+    logMessage("PEN_STATUS disabled: no pen servo assigned (use SERVO_STATUS <id>)");
+    return;
+  }
+  int position = -1;
+  if (pen_controller.ping() && pen_controller.readPosition(position)) {
+    logMessage("PEN_STATUS OK id=%u position=%d (0..%u) commanded=%s",
+               PEN_SERVO_ID, position, PEN_SERVO_MAX_POSITION,
+               pen_controller.isPenDown() ? "DOWN" : "UP");
+  } else {
+    logMessage("ERROR: PEN_STATUS STS3020 no response");
+  }
+}
+
+// isReadOnlyCommand() commands. moving: called from the jog session, where
+// the multi-register TMC diagnostics are skipped.
+void runReadOnlyCommand(const CommandMessage& command, bool moving) {
+  switch (command.type) {
+    case CommandType::HELP:
+      Diagnostics::printHelp();
+      break;
+    case CommandType::CONFIG:
+      Diagnostics::printConfig();
+      break;
+    case CommandType::POS:
+    case CommandType::GCODE:  // M114
+      Diagnostics::printPosition(currentStatus());
+      break;
+    case CommandType::PEN_STATUS:
+      handlePenStatus();
+      break;
+    case CommandType::SERVO_STATUS:
+      handleServoStatus(command.servo_id);
+      break;
+    case CommandType::HOME_STATUS:
+      Diagnostics::printHomingStatus(currentStatus());
+      break;
+    case CommandType::LIMIT_STATUS:
+      safety_manager.poll();
+      Diagnostics::printLimitStatus(currentStatus());
+      break;
+    case CommandType::TMC_STATUS:
+      tmc_manager.printStatus();
+      if (moving) {
+        logMessage("TMC_STATUS diagnostics skipped reason=jog_active");
+      } else {
+        Diagnostics::runTmcDiagnostics();
+      }
+      break;
+    case CommandType::JOB_STATUS:
+      job_controller.printStatus();
+      break;
+    default:
+      break;
+  }
+}
+
 // ---------------------------------------------------------------------------
-// Atom JoyStick jog session (test mode only)
+// STOP
 // ---------------------------------------------------------------------------
-// JogRequests arrive through the 1-deep JogQueue from joystickTask (Core 0).
-// XY runs in backend velocity mode; servos ID1 (Z) / ID2 (arm) use the
-// StsServoBus jog. Any Serial command ends the session so the PC stays in
-// charge.
+// commandTask sets the stop flag (running XY / jog / test moves decelerate at
+// once) and puts STOP at the front of CommandQueue. Here, after the motion
+// has stopped: discard the motion commands queued before STOP, keep the
+// others, and report. No alarm, HOMED unchanged.
+CommandMessage stop_kept_commands[COMMAND_QUEUE_LENGTH];
+
+void completeStop() {
+  clearMotionStop();
+  size_t kept_count = 0;
+  bool kept_pending = false;
+  if (has_pending_command && pending_command.type != CommandType::STOP) {
+    if (isMotionCommand(pending_command)) {
+      logCommandNack(pending_command, "stopped");
+      has_pending_command = false;
+    } else {
+      kept_pending = true;
+    }
+  } else {
+    has_pending_command = false;
+  }
+  CommandMessage command;
+  while (command_queue != nullptr && kept_count < COMMAND_QUEUE_LENGTH &&
+         xQueueReceive(command_queue, &command, 0) == pdTRUE) {
+    if (command.type == CommandType::STOP) continue;
+    if (isMotionCommand(command)) {
+      logCommandNack(command, "stopped");
+      continue;
+    }
+    stop_kept_commands[kept_count++] = command;
+  }
+  planner_queue.clear();
+  segment_queue.clear();
+  has_pending_command = kept_pending;
+  for (size_t index = 0; index < kept_count; ++index) {
+    if (xQueueSend(command_queue, &stop_kept_commands[index], 0) != pdTRUE) {
+      logMessage("WARN: STOP dropped %s (CommandQueue full)", stop_kept_commands[index].name);
+    }
+  }
+  if (job_controller.isActive() || job_controller.isRunning()) {
+    job_controller.markAborted("stopped");
+    logMessage("JOB stopped by STOP (state=%s)", job_controller.stateName());
+  }
+  syncJobActiveFlag();
+  postLedStatus(LedStatus::IDLE);
+  logMessage("STOP complete X=%.3f Y=%.3f HOMED=%s", machine_state.x_mm, machine_state.y_mm,
+             machine_state.homed ? "YES" : "NO");
+}
+
+// ---------------------------------------------------------------------------
+// Jog session (Atom JoyStick and Serial JOG)
+// ---------------------------------------------------------------------------
+// Velocity requests come from the 1-deep JogQueue (joystickTask) and
+// SerialJogQueue (commandTask). XY runs in backend velocity mode; servos ID1
+// (Z) / ID2 (arm) use the StsServoBus jog. No TEST_MODE needed. A session
+// started HOMED keeps HOMED (the position comes from the backend step count)
+// and brakes before the soft limits. During the session read-only commands
+// are answered, STOP/ABORT end it, other commands get NACK reason=jog_active.
+// Serial JOG has priority: once it arrives, joystick input is ignored for the
+// rest of the session.
+
+enum class JogSource : uint8_t { JOYSTICK, SERIAL_JOG };
+
+const char* jogSourceName(JogSource source) {
+  return source == JogSource::SERIAL_JOG ? "SERIAL" : "JOY";
+}
+
+float jogAccelMmS2(JogSource source) {
+  return source == JogSource::SERIAL_JOG ? SERIAL_JOG_ACCEL_MM_S2 : JOY_ACCEL_MM_S2;
+}
+
+uint32_t jogMotorAccelStepsS2(float accel_mm_s2) {
+  return static_cast<uint32_t>(accel_mm_s2 * STEPS_PER_MM * COREXY_MAX_MOTOR_GAIN + 0.5f);
+}
 
 bool peekJogRequest(JogRequest& request) {
   return jog_queue != nullptr && xQueuePeek(jog_queue, &request, 0) == pdTRUE;
@@ -1091,22 +1411,106 @@ void setJoystickEvent(const char* format, const char* reason) {
            format, reason);
 }
 
-void runJogSession(const JogRequest& first) {
+// Why a new jog session may not start (nullptr: allowed).
+const char* jogBlockedReason() {
+  if (safety_manager.isAlarmed()) return "alarm";
+  if (machine_state.homing_active) return "homing";
+  if (job_controller.isActive() || job_controller.isRunning()) return "job_active";
+  if (stepper_backend.isRunning()) return "busy";
+  return nullptr;
+}
+
+// Returns false when the session must end: STOP/ABORT/JOB_ABORT are stashed
+// for the main loop, which reports them.
+bool serviceCommandsDuringJog() {
+  CommandMessage command;
+  while (receiveNextCommand(command, 0)) {
+    if (command.type == CommandType::STOP || command.type == CommandType::ABORT ||
+        command.type == CommandType::JOB_ABORT) {
+      stashPendingCommand(command);
+      return false;
+    }
+    if (isReadOnlyCommand(command)) {
+      runReadOnlyCommand(command, true);
+    } else {
+      logCommandNack(command, "jog_active");
+    }
+  }
+  return true;
+}
+
+void logJogPos(float vx_mm_s, float vy_mm_s) {
+  int32_t z_counts = 0;
+  int32_t arm_counts = 0;
+  const bool z_known = sts_servo_bus.trackedAbsCounts(1, z_counts);
+  const bool arm_known = sts_servo_bus.trackedAbsCounts(2, arm_counts);
+  char z_text[16];
+  char arm_text[16];
+  if (z_known) snprintf(z_text, sizeof(z_text), "%ld", static_cast<long>(z_counts));
+  else snprintf(z_text, sizeof(z_text), "NA");
+  if (arm_known) snprintf(arm_text, sizeof(arm_text), "%ld", static_cast<long>(arm_counts));
+  else snprintf(arm_text, sizeof(arm_text), "NA");
+  logMessage("JOG_POS X=%.3f Y=%.3f VX=%.1f VY=%.1f Z_ABS=%s ARM_ABS=%s", machine_state.x_mm,
+             machine_state.y_mm, vx_mm_s, vy_mm_s, z_text, arm_text);
+}
+
+struct JogPosReporter {
+  uint32_t due_ms = 0;      // next line; advanced by the interval so the
+                            // 20 ms session loop still averages 20 Hz
+  uint32_t sample_ms = 0;   // time of the last line, for VX/VY
+  float last_x_mm = 0.0f;
+  float last_y_mm = 0.0f;
+
+  void reset() {
+    sample_ms = millis();
+    due_ms = sample_ms + JOG_POS_INTERVAL_MS;
+    last_x_mm = machine_state.x_mm;
+    last_y_mm = machine_state.y_mm;
+  }
+  // VX/VY are measured from the position change since the last line.
+  void poll(bool force) {
+    if (JOG_POS_INTERVAL_MS == 0) return;
+    const uint32_t now_ms = millis();
+    if (!force && static_cast<int32_t>(now_ms - due_ms) < 0) return;
+    due_ms += JOG_POS_INTERVAL_MS;
+    if (static_cast<int32_t>(now_ms - due_ms) >= 0) due_ms = now_ms + JOG_POS_INTERVAL_MS;
+    const uint32_t elapsed_ms = now_ms - sample_ms;
+    const float dt_s = elapsed_ms > 0 ? static_cast<float>(elapsed_ms) / 1000.0f : 1.0f;
+    logJogPos((machine_state.x_mm - last_x_mm) / dt_s, (machine_state.y_mm - last_y_mm) / dt_s);
+    sample_ms = now_ms;
+    last_x_mm = machine_state.x_mm;
+    last_y_mm = machine_state.y_mm;
+  }
+};
+
+void runJogSession(const JogRequest& first, JogSource first_source) {
   constexpr uint8_t SERVO_IDS[2] = {1, 2};
-  const uint32_t accel_steps_s2 = static_cast<uint32_t>(
-      JOY_ACCEL_MM_S2 * STEPS_PER_MM * COREXY_MAX_MOTOR_GAIN + 0.5f);
+  JogSource source = first_source;
+  float accel_mm_s2 = jogAccelMmS2(source);
+  uint32_t accel_steps_s2 = jogMotorAccelStepsS2(accel_mm_s2);
+  const float max_speed_mm_s = MAX_FEED_MM_MIN / 60.0f;
+  const bool homed_at_start = machine_state.homed;
   bool xy_ready = false;
   bool xy_failed = false;
+  bool not_homed_reported = false;
   bool servo_begun[2] = {false, false};
   bool servo_failed[2] = {false, false};
   bool moving_toward_x = false;
   bool moving_toward_y = false;
   bool x_was_active = safety_manager.xLimitActive() || safety_manager.xLimitRawActive();
   bool y_was_active = safety_manager.yLimitActive() || safety_manager.yLimitRawActive();
+  bool soft_limit_x_logged = false;
+  bool soft_limit_y_logged = false;
   const char* reason = "idle";
+  // Ended by STOP / a limit / an alarm: a still held Serial JOG key must be
+  // released (JOG 0 0 or a pause) before it can start a new session.
+  bool require_release = false;
   uint32_t zero_since_ms = 0;
+  uint32_t last_serial_ms = first.time_ms;
   JogRequest request = first;
   const MotionSyncReference reference = captureMotionSyncReference();
+  JogPosReporter pos_reporter;
+  pos_reporter.reset();
 
   const uint32_t session_start_ms = millis();
   // Latency diagnostics: request age at start, TMC check, servo hold checks,
@@ -1114,28 +1518,56 @@ void runJogSession(const JogRequest& first) {
   const uint32_t request_age_ms = session_start_ms - first.time_ms;
   uint32_t tmc_check_ms = 0;
   bool xy_start_logged = false;
+  serial_jog_gate.rejected = false;
   machine_state.joystick_jog_active = true;
+  // Joystick jog without HOME: slow XY, no soft limit; the UI warns.
+  machine_state.jog_unhomed = source == JogSource::JOYSTICK && !homed_at_start;
+  machine_state.jog_unhomed_moving = false;
+  if (machine_state.jog_unhomed) {
+    logMessage("JOG unhomed: XY max %.0f mm/min, no soft limit (HOME to lift)",
+               JOY_UNHOMED_MAX_FEED_MM_MIN);
+  }
   setMotionActive(true);
-  logMessage("JOY_JOG start vx=%.1f vy=%.1f z=%ld arm=%ld", first.vx_mm_s, first.vy_mm_s,
-             static_cast<long>(first.z_counts_s), static_cast<long>(first.arm_counts_s));
+  logMessage("JOG start vx=%.1f vy=%.1f z=%ld arm=%ld src=%s HOMED=%s", first.vx_mm_s,
+             first.vy_mm_s, static_cast<long>(first.z_counts_s),
+             static_cast<long>(first.arm_counts_s), jogSourceName(source),
+             homed_at_start ? "YES" : "NO");
 
   for (;;) {
-    if (stopForAbort("JOY_JOG stopped")) {
+    if (stopForAbort("JOG stopped")) {
       reason = "abort";
       break;
     }
-    if (has_pending_command || !commandQueueEmpty()) {
-      // Serial/WebUI commands and joystick buttons (TEST_MODE, ABORT, ...).
-      reason = "command";
+    if (isMotionStopRequested() || !serviceCommandsDuringJog()) {
+      reason = isMotionAbortRequested() ? "abort" : "command";
+      require_release = true;
       break;
     }
-    if (!machine_state.test_mode_active) {
-      reason = "test_mode_off";
-      break;
+
+    // Input. Serial JOG takes over a joystick session.
+    JogRequest serial_request;
+    if (receiveSerialJog(serial_request)) {
+      if (source != JogSource::SERIAL_JOG) {
+        source = JogSource::SERIAL_JOG;
+        accel_mm_s2 = jogAccelMmS2(source);
+        accel_steps_s2 = jogMotorAccelStepsS2(accel_mm_s2);
+        logMessage("JOG src=SERIAL (joystick ignored until the session ends)");
+      }
+      request = serial_request;
+      last_serial_ms = serial_request.time_ms;
+      if (jogRequestIsZero(serial_request)) {
+        reason = "zero";
+        break;
+      }
     }
-    peekJogRequest(request);
-    if (!jogRequestFresh(request)) {
-      reason = "link_lost";
+    if (source == JogSource::JOYSTICK) {
+      peekJogRequest(request);
+      if (!jogRequestFresh(request)) {
+        reason = "link_lost";
+        break;
+      }
+    } else if (millis() - last_serial_ms > SERIAL_JOG_TIMEOUT_MS) {
+      reason = "timeout";
       break;
     }
 
@@ -1145,6 +1577,7 @@ void runJogSession(const JogRequest& first) {
     if (machine_state.alarmed) {
       stepper_backend.stop();
       reason = "alarm";
+      require_release = true;
       break;
     }
     const bool x_active = safety_manager.xLimitActive() || safety_manager.xLimitRawActive();
@@ -1153,21 +1586,71 @@ void runJogSession(const JogRequest& first) {
         (y_active && !y_was_active && moving_toward_y)) {
       stepper_backend.stop();
       reason = x_active && !x_was_active ? "limit_x" : "limit_y";
+      require_release = true;
       break;
     }
     x_was_active = x_active;
     y_was_active = y_active;
     float vx_mm_s = request.vx_mm_s;
     float vy_mm_s = request.vy_mm_s;
+    jogClampSpeed(vx_mm_s, vy_mm_s, max_speed_mm_s);
+    if (!homed_at_start) {
+      jogClampSpeed(vx_mm_s, vy_mm_s, JOY_UNHOMED_MAX_FEED_MM_MIN / 60.0f);
+    }
+    if (source == JogSource::SERIAL_JOG && !homed_at_start && (vx_mm_s != 0.0f || vy_mm_s != 0.0f)) {
+      // Serial XY jog needs HOME; servo axes keep running.
+      if (!not_homed_reported) {
+        logMessage("NACK_JOG reason=not_homed (XY ignored in this session)");
+        not_homed_reported = true;
+      }
+      vx_mm_s = 0.0f;
+      vy_mm_s = 0.0f;
+    }
     joyMaskTowardLimits(vx_mm_s, vy_mm_s, x_active, y_active, HOMING_X_DIR, HOMING_Y_DIR);
+    if (homed_at_start) {
+      const float brake_mm_s2 = accel_mm_s2 * JOG_SOFT_LIMIT_BRAKE_RATIO;
+      const float limited_vx_mm_s = jogSoftLimitVelocity(
+          vx_mm_s, machine_state.x_mm, X_MIN_MM, X_MAX_MM, brake_mm_s2,
+          JOG_SOFT_LIMIT_LATENCY_S, JOG_SOFT_LIMIT_STOP_MARGIN_MM);
+      const float limited_vy_mm_s = jogSoftLimitVelocity(
+          vy_mm_s, machine_state.y_mm, Y_MIN_MM, Y_MAX_MM, brake_mm_s2,
+          JOG_SOFT_LIMIT_LATENCY_S, JOG_SOFT_LIMIT_STOP_MARGIN_MM);
+      const bool x_blocked = vx_mm_s != 0.0f && limited_vx_mm_s == 0.0f;
+      const bool y_blocked = vy_mm_s != 0.0f && limited_vy_mm_s == 0.0f;
+      if (x_blocked && !soft_limit_x_logged) {
+        logMessage("JOG soft_limit axis=X X=%.3f", machine_state.x_mm);
+      }
+      if (y_blocked && !soft_limit_y_logged) {
+        logMessage("JOG soft_limit axis=Y Y=%.3f", machine_state.y_mm);
+      }
+      soft_limit_x_logged = x_blocked;
+      soft_limit_y_logged = y_blocked;
+      vx_mm_s = limited_vx_mm_s;
+      vy_mm_s = limited_vy_mm_s;
+    }
     const bool xy_requested = vx_mm_s != 0.0f || vy_mm_s != 0.0f;
     if (xy_requested && !xy_ready && !xy_failed) {
       const uint32_t tmc_started_ms = millis();
-      xy_failed = !ensureTmcReadyForMotion("JOY_JOG");
+      xy_failed = !ensureTmcReadyForMotion("JOG");
       tmc_check_ms = millis() - tmc_started_ms;
       if (!xy_failed) {
-        invalidateHomed("joystick jog without homing");
+        // Un-homed jog: drop partial X/Y homing (HOMED was already NO).
+        if (!homed_at_start && (machine_state.x_homed || machine_state.y_homed)) {
+          invalidateHomed("jog without homing");
+        }
         xy_ready = true;
+      }
+    }
+    if (xy_requested) {
+      // Keep both motors within JOG_MAX_MOTOR_STEPS_S, keeping the direction:
+      // on a diagonal one CoreXY motor turns sqrt(2) times faster.
+      const CoreXYDelta rate =
+          CoreXYKinematics::xyDeltaToABSteps(vx_mm_s, vy_mm_s, STEPS_PER_MM);
+      const float fastest = fmaxf(fabsf(static_cast<float>(rate.a_steps)),
+                                  fabsf(static_cast<float>(rate.b_steps)));
+      if (fastest > JOG_MAX_MOTOR_STEPS_S) {
+        vx_mm_s *= JOG_MAX_MOTOR_STEPS_S / fastest;
+        vy_mm_s *= JOG_MAX_MOTOR_STEPS_S / fastest;
       }
     }
     if (xy_ready && xy_requested) {
@@ -1177,7 +1660,7 @@ void runJogSession(const JogRequest& first) {
       stepper_backend.setVelocityAB(rate.a_steps, rate.b_steps, accel_steps_s2);
       if (!xy_start_logged) {
         xy_start_logged = true;
-        logMessage("JOY_JOG xy_start after_session_ms=%lu request_age_ms=%lu tmc_check_ms=%lu",
+        logMessage("JOG xy_start after_session_ms=%lu request_age_ms=%lu tmc_check_ms=%lu",
                    static_cast<unsigned long>(millis() - session_start_ms),
                    static_cast<unsigned long>(request_age_ms),
                    static_cast<unsigned long>(tmc_check_ms));
@@ -1186,6 +1669,11 @@ void runJogSession(const JogRequest& first) {
       moving_toward_y = vy_mm_s * static_cast<float>(HOMING_Y_DIR) > 0.0f;
     } else if (xy_ready) {
       stepper_backend.stopVelocity();
+    }
+    const bool unhomed_moving = machine_state.jog_unhomed && xy_ready && xy_requested;
+    if (unhomed_moving != machine_state.jog_unhomed_moving) {
+      machine_state.jog_unhomed_moving = unhomed_moving;
+      publishStatus();
     }
     updateMachinePositionEstimateFromBackend(reference);
 
@@ -1200,18 +1688,19 @@ void runJogSession(const JogRequest& first) {
         const uint32_t begin_started_ms = millis();
         if (!sts_servo_bus.beginJog(SERVO_IDS[i], detail, sizeof(detail))) {
           servo_failed[i] = true;
-          logMessage("JOY_JOG servo id=%u disabled %s", SERVO_IDS[i], detail);
+          logMessage("JOG servo id=%u disabled %s", SERVO_IDS[i], detail);
           continue;
         }
         servo_begun[i] = true;
-        logMessage("JOY_JOG servo id=%u begin_ms=%lu (hold check; XY waits)", SERVO_IDS[i],
+        logMessage("JOG servo id=%u begin_ms=%lu (hold check; XY waits)", SERVO_IDS[i],
                    static_cast<unsigned long>(millis() - begin_started_ms));
       }
       if (!sts_servo_bus.updateJog(SERVO_IDS[i], servo_rates[i], detail, sizeof(detail))) {
         servo_failed[i] = true;
-        logMessage("JOY_JOG servo id=%u stopped %s", SERVO_IDS[i], detail);
+        logMessage("JOG servo id=%u stopped %s", SERVO_IDS[i], detail);
       }
     }
+    pos_reporter.poll(false);
 
     if (jogRequestIsZero(request) && !stepper_backend.isRunning()) {
       if (zero_since_ms == 0) zero_since_ms = millis();
@@ -1225,7 +1714,8 @@ void runJogSession(const JogRequest& first) {
     vTaskDelay(pdMS_TO_TICKS(JOY_SESSION_PERIOD_MS));
   }
 
-  // Decelerate XY, still stopping at once on a new limit hit.
+  // Decelerate XY, still stopping at once on a new limit hit. The soft-limit
+  // speed cap above keeps this ramp inside the soft limits.
   stepper_backend.stopVelocity();
   while (stepper_backend.isRunning()) {
     safety_manager.poll();
@@ -1236,6 +1726,7 @@ void runJogSession(const JogRequest& first) {
       stepper_backend.stop();
     }
     updateMachinePositionEstimateFromBackend(reference);
+    pos_reporter.poll(false);
     vTaskDelay(pdMS_TO_TICKS(1));
   }
   updateMachinePositionEstimateFromBackend(reference);
@@ -1243,16 +1734,39 @@ void runJogSession(const JogRequest& first) {
   for (int i = 0; i < 2; ++i) {
     if (servo_begun[i]) sts_servo_bus.endJog(SERVO_IDS[i]);
   }
-  setMotionActive(false);
+  pos_reporter.poll(true);
+  if (require_release) {
+    serial_jog_gate.rejected = true;
+    serial_jog_gate.last_ms = millis();
+  }
   machine_state.joystick_jog_active = false;
+  machine_state.jog_unhomed = false;
+  machine_state.jog_unhomed_moving = false;
+  setMotionActive(false);
   setJoystickEvent("JOG end %s", reason);
-  logMessage("JOY_JOG end reason=%s X=%.3f Y=%.3f%s", reason, machine_state.x_mm,
-             machine_state.y_mm, xy_failed ? " xy=tmc_not_ready" : "");
+  logMessage("JOG end reason=%s X=%.3f Y=%.3f HOMED=%s src=%s%s", reason, machine_state.x_mm,
+             machine_state.y_mm, machine_state.homed ? "YES" : "NO", jogSourceName(source),
+             xy_failed ? " xy=tmc_not_ready" : "");
   publishStatus();
 }
 
-// Called while motionTask waits for commands.
-void pollJoystick() {
+// Called while motionTask waits for commands. Serial JOG first.
+void pollJog() {
+  JogRequest serial_request;
+  if (receiveSerialJog(serial_request) && !serialJogHeldAfterReject(serial_request) &&
+      !jogRequestIsZero(serial_request) && !serialJogStale(serial_request)) {
+    const bool xy_requested = serial_request.vx_mm_s != 0.0f || serial_request.vy_mm_s != 0.0f;
+    const char* blocked = jogBlockedReason();
+    if (blocked == nullptr && xy_requested && !machine_state.homed) blocked = "not_homed";
+    if (blocked != nullptr) {
+      rejectSerialJog(serial_request, blocked);
+    } else {
+      runJogSession(serial_request, JogSource::SERIAL_JOG);
+      return;
+    }
+  }
+
+  if (!JOYSTICK_ENABLED) return;
   JogRequest request;
   if (!peekJogRequest(request)) return;
   const bool linked = jogRequestFresh(request);
@@ -1265,11 +1779,8 @@ void pollJoystick() {
     ignored_logged = false;
     return;
   }
-  const char* blocked = nullptr;
-  if (!machine_state.test_mode_active) blocked = "test_mode_off";
-  else if (safety_manager.isAlarmed()) blocked = "alarm";
-  else if (job_controller.isActive() || job_controller.isRunning()) blocked = "job_active";
-  else if (machine_state.homing_active) blocked = "homing";
+  // Joystick jog may start un-homed (recovery use); it then stays HOMED=NO.
+  const char* blocked = jogBlockedReason();
   if (blocked != nullptr) {
     if (!ignored_logged) {
       logMessage("JOY_JOG ignored reason=%s", blocked);
@@ -1280,7 +1791,7 @@ void pollJoystick() {
     return;
   }
   ignored_logged = false;
-  runJogSession(request);
+  runJogSession(request, JogSource::JOYSTICK);
 }
 }
 
@@ -1301,10 +1812,10 @@ void motionTask(void*) {
   publishStatus();
   CommandMessage command;
   for (;;) {
-    const TickType_t wait = JOYSTICK_ENABLED ? pdMS_TO_TICKS(JOY_SESSION_PERIOD_MS)
-                                             : portMAX_DELAY;
-    if (!receiveNextCommand(command, wait)) {
-      if (JOYSTICK_ENABLED) pollJoystick();
+    if (isMotionStopRequested() && takeStopCommandLost()) completeStop();
+    // Short wait: Serial JOG and the joystick are polled between commands.
+    if (!receiveNextCommand(command, pdMS_TO_TICKS(JOY_SESSION_PERIOD_MS))) {
+      pollJog();
       continue;
     }
     syncJobActiveFlag();
@@ -1312,17 +1823,29 @@ void motionTask(void*) {
       publishStatus();
       continue;
     }
+    // STOP is pending (its flag is set before it reaches the queue front):
+    // motion commands queued before it are not started.
+    if (isMotionStopRequested() && isMotionCommand(command)) {
+      logCommandNack(command, "stopped");
+      continue;
+    }
     switch (command.type) {
       case CommandType::HELP:
-        Diagnostics::printHelp();
-        break;
       case CommandType::CONFIG:
-        Diagnostics::printConfig();
+      case CommandType::POS:
+      case CommandType::PEN_STATUS:
+      case CommandType::SERVO_STATUS:
+      case CommandType::HOME_STATUS:
+      case CommandType::LIMIT_STATUS:
+      case CommandType::TMC_STATUS:
+      case CommandType::JOB_STATUS:
+        runReadOnlyCommand(command, false);
         break;
-      case CommandType::POS: {
-        Diagnostics::printPosition(currentStatus());
+      case CommandType::STOP:
+        completeStop();
         break;
-      }
+      case CommandType::JOG:
+        break;  // never queued: commandTask forwards JOG to SerialJogQueue
       case CommandType::ZERO:
         machine_state.x_mm = 0;
         machine_state.y_mm = 0;
@@ -1349,9 +1872,6 @@ void motionTask(void*) {
         break;
       case CommandType::TEST_JOG:
         handleTestJog(command);
-        break;
-      case CommandType::SERVO_STATUS:
-        handleServoStatus(command.servo_id);
         break;
       case CommandType::SERVO_OFF:
         logMessage("SERVO_OFF id=%u result=%s", command.servo_id,
@@ -1433,21 +1953,6 @@ void motionTask(void*) {
           }
         }
         break;
-      case CommandType::PEN_STATUS: {
-        if (!PEN_SERVO_ENABLED) {
-          logMessage("PEN_STATUS disabled: no pen servo assigned (use SERVO_STATUS <id>)");
-          break;
-        }
-        int position = -1;
-        if (pen_controller.ping() && pen_controller.readPosition(position)) {
-          logMessage("PEN_STATUS OK id=%u position=%d (0..%u) commanded=%s",
-                     PEN_SERVO_ID, position, PEN_SERVO_MAX_POSITION,
-                     pen_controller.isPenDown() ? "DOWN" : "UP");
-        } else {
-          logMessage("ERROR: PEN_STATUS STS3020 no response");
-        }
-        break;
-      }
       case CommandType::SELFTEST:
         Diagnostics::runSelfTest();
         break;
@@ -1456,10 +1961,6 @@ void motionTask(void*) {
         last_tmc_health = machine_state.tmc_ready ? TMC2209Health::OK
                                                   : TMC2209Health::NO_REPLY;
         last_tmc_check_ms = millis();
-        break;
-      case CommandType::TMC_STATUS:
-        tmc_manager.printStatus();
-        Diagnostics::runTmcDiagnostics();
         break;
       case CommandType::HOME:
         if (ensureTmcReadyForMotion("HOME")) {
@@ -1502,13 +2003,6 @@ void motionTask(void*) {
           }
           clearMotionQueues("HOME_Y end");
         }
-        break;
-      case CommandType::HOME_STATUS:
-        Diagnostics::printHomingStatus(currentStatus());
-        break;
-      case CommandType::LIMIT_STATUS:
-        safety_manager.poll();
-        Diagnostics::printLimitStatus(currentStatus());
         break;
       case CommandType::ALARM_CLEAR:
         safety_manager.poll();
@@ -1566,9 +2060,6 @@ void motionTask(void*) {
           logMessage("JOB_ABORT complete");
         }
         break;
-      case CommandType::JOB_STATUS:
-        job_controller.printStatus();
-        break;
       case CommandType::MELODY:
         motor_melody_controller.play(stepper_backend, tmc_manager,
                                      safety_manager);
@@ -1605,6 +2096,13 @@ void motionTask(void*) {
       case CommandType::INVALID:
         break;
     }
+    if (isMotionCommand(command)) {
+      // A JOG sent while this command ran must not start afterwards.
+      const bool homing = command.type == CommandType::HOME ||
+                          command.type == CommandType::HOME_X ||
+                          command.type == CommandType::HOME_Y;
+      rejectSerialJogWhileBusy(homing ? "homing" : motionBusyReason());
+    }
     machine_state.alarmed = safety_manager.isAlarmed();
     if (machine_state.alarmed && (job_controller.isActive() ||
                                   job_controller.isRunning())) {
@@ -1613,5 +2111,8 @@ void motionTask(void*) {
     }
     syncJobActiveFlag();
     publishStatus();
+    // Also poll here so a steady command stream (e.g. POS at 10 Hz) cannot
+    // starve the jog inputs. A stashed command keeps its turn first.
+    if (!has_pending_command) pollJog();
   }
 }

@@ -82,6 +82,12 @@ bool StsServoBus::isTracking(uint8_t id) const {
   return validId(id) && tracks_[id].valid;
 }
 
+bool StsServoBus::trackedAbsCounts(uint8_t id, int32_t& abs_counts) const {
+  if (!isTracking(id)) return false;
+  abs_counts = tracks_[id].abs_counts;
+  return true;
+}
+
 bool StsServoBus::ping(uint8_t id) {
   if (!initialized_) return false;
 #if SIMULATION_MODE

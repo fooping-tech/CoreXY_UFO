@@ -13,7 +13,8 @@ void Diagnostics::printHelp() {
   logMessage("PENUP PENDOWN PEN_STATUS (disabled while PEN_SERVO_ENABLED=false) SELFTEST TMC_INIT TMC_STATUS");
   logMessage("TEST_MODE <ON|OFF> TEST_JOG <dx_mm> <dy_mm> [feed] TEST_A/TEST_B <steps> [feed]");
   logMessage("SERVO_STATUS <id> SERVO_ANGLE <id> <deg> SERVO_TURN <id> <turns> SERVO_OFF <id>");
-  logMessage("Atom JoyStick (ESP-NOW): test mode only; any Serial command ends a jog");
+  logMessage("JOG <vx_mm_s> <vy_mm_s> [<z_counts_s> <arm_counts_s>] (resend every 50ms; JOG 0 0 stops) STOP (decelerate, no alarm)");
+  logMessage("Atom JoyStick (ESP-NOW): no TEST_MODE needed; Serial JOG has priority");
   logMessage("G0/G1 X Y F G4 P<ms> G20 G21 G28 G90 G91 M3 M5 M114");
   logMessage("NeoPixel commands DISABLED (GPIO33 used by STS3020 UART RX)");
   logMessage("LED_PATTERN <OFF|SOLID|PACIFICA|FIRE|BREATH|CHASE|PROGRESS|ALERT|SUCCESS>");
@@ -49,6 +50,11 @@ void Diagnostics::printConfig() {
              JUNCTION_DEVIATION_MM, CLASSIC_JERK_LIMIT_MM_S,
              LOOKAHEAD_BATCH_COLLECT_MS,
              static_cast<unsigned>(PlannerQueue::CAPACITY));
+  logMessage("JOG serial_timeout_ms=%lu serial_accel=%.1f joy_accel=%.1f max_speed=%.1fmm/s soft_limit_brake_ratio=%.2f latency_s=%.3f margin=%.2fmm jog_pos_ms=%lu",
+             static_cast<unsigned long>(SERIAL_JOG_TIMEOUT_MS), SERIAL_JOG_ACCEL_MM_S2,
+             JOY_ACCEL_MM_S2, MAX_FEED_MM_MIN / 60.0f, JOG_SOFT_LIMIT_BRAKE_RATIO,
+             JOG_SOFT_LIMIT_LATENCY_S, JOG_SOFT_LIMIT_STOP_MARGIN_MM,
+             static_cast<unsigned long>(JOG_POS_INTERVAL_MS));
   logMessage("JOB state=%s result=%s last_error=%s",
              job_controller.stateName(), job_controller.result(),
              job_controller.lastError());
@@ -64,10 +70,10 @@ void Diagnostics::printConfig() {
       joystick_link.pairedMac(mac);
       formatMac(mac, atom_mac);
     }
-    logMessage("JOY enabled=%u ready=%u channel=%u core2_mac=%s atom_mac=%s feed=%.0f/%.0f/%.0f/%.0f servo=%ld",
+    logMessage("JOY enabled=%u ready=%u channel=%u core2_mac=%s atom_mac=%s feed=%.0f/%.0f/%.0f/%.0f/%.0f servo=%ld",
                JOYSTICK_ENABLED, joystick_link.ready(), JOY_ESPNOW_CHANNEL, core2_mac,
                atom_mac, JOY_SLOW_FEED_MM_MIN, JOY_FAST_FEED_MM_MIN,
-               JOY_VERY_FAST_FEED_MM_MIN, JOY_ULTRA_FEED_MM_MIN,
+               JOY_VERY_FAST_FEED_MM_MIN, JOY_ULTRA_FEED_MM_MIN, JOY_MAX_FEED_MM_MIN,
                static_cast<long>(JOY_SERVO_MAX_COUNTS_S));
   }
   logMessage("JOB_END park_enabled=%u park=(%.3f,%.3f) park_feed=%.3f jingle_enabled=%u",

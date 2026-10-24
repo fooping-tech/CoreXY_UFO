@@ -3,6 +3,7 @@
 #include "PlotterConfig.h"
 #include <ctype.h>
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -97,6 +98,24 @@ CommandMessage CommandDispatcher::parse(const char* line) {
   else if (strcmp(name, "LIMIT_STATUS") == 0) command.type = CommandType::LIMIT_STATUS;
   else if (strcmp(name, "ALARM_CLEAR") == 0) command.type = CommandType::ALARM_CLEAR;
   else if (strcmp(name, "ABORT") == 0) command.type = CommandType::ABORT;
+  else if (strcmp(name, "STOP") == 0) command.type = CommandType::STOP;
+  else if (strcmp(name, "JOG") == 0) {
+    // JOG <vx_mm_s> <vy_mm_s> [<z_counts_s> <arm_counts_s>]
+    long z_counts_s = 0;
+    long arm_counts_s = 0;
+    const int parsed = sscanf(line, "%*s %f %f %ld %ld", &command.jog_vx_mm_s,
+                              &command.jog_vy_mm_s, &z_counts_s, &arm_counts_s);
+    if ((parsed != 2 && parsed != 4) || !isfinite(command.jog_vx_mm_s) ||
+        !isfinite(command.jog_vy_mm_s) || labs(z_counts_s) > INT16_MAX ||
+        labs(arm_counts_s) > INT16_MAX) {
+      snprintf(command.error, sizeof(command.error),
+               "JOG requires <vx_mm_s> <vy_mm_s> [<z_counts_s> <arm_counts_s>]");
+      return command;
+    }
+    command.jog_z_counts_s = static_cast<int32_t>(z_counts_s);
+    command.jog_arm_counts_s = static_cast<int32_t>(arm_counts_s);
+    command.type = CommandType::JOG;
+  }
   else if (strcmp(name, "JOB_BEGIN") == 0) command.type = CommandType::JOB_BEGIN;
   else if (strcmp(name, "JOB_END") == 0) command.type = CommandType::JOB_END;
   else if (strcmp(name, "JOB_ABORT") == 0) command.type = CommandType::JOB_ABORT;

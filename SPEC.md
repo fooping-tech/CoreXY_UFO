@@ -1320,6 +1320,7 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - ユーザー実機確認によりソフトリミットをX 0..390mm、Y 0..200mm(ユーザー指定値、余裕込み)へ変更。旧値X 500 / Y 250は暫定値だった。
 - 連動: JOB_END退避位置は(5, 195)。WebUIの`SOFT_LIMIT`(プレビュー・範囲警告)と、server.pyのテキストG-code生成上限(`--max-x/--max-y`)も390/200へ。
 - ソフトリミットはhoming後の通常XY/G-code移動に適用される。テストモード(TEST_JOG、ジョイスティック)はホーミング不要のため適用されない(奥側にリミットスイッチはない)。
+- 2026-10-24: HOMEDで始めたジョグ(ジョイスティック/Serial `JOG`)にはソフトリミット減速を適用する(下記)。TEST_JOGとHOMEDなしのジョグには従来どおり適用されない。
 
 ## 2026-10-22: ジョイスティックのXYラグ対策
 
@@ -1333,3 +1334,58 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - テストモードのサーボ速度`STS_TEST_SPEED_COUNTS_PER_S`を800→2400 counts/s(約0.6 rev/s)、`STS_TEST_ACC`を20→50(5000 counts/s^2)。SERVO_TURN/SERVO_ANGLE(WebUI Testタブ、Serial)とジョイスティック(`JOY_SERVO_MAX_COUNTS_S`は同値)の両方に適用。
 - 読出し欠落で追跡を無効化する時間`STS_TEST_MAX_READ_GAP_MS`を500→250ms(欠落中の移動を600 counts以下に抑え、折り返し補正の半回転条件を守る)。速度×欠落時間<1/4回転をstatic_assertで保証。
 - 実測(無負荷、7.6V): 1/4回転 約0.93s、1回転 約2.2s、3回転 約5.6s(従来15.7s)、誤差±1 count、error flags 0x00。
+
+## 2026-10-24: Serial速度ジョグ`JOG`と非アラーム停止`STOP`
+
+依頼: CoreXY_UFO_Game `docs/HANDOFF_FIRMWARE_JOG.md`。手順: `tools/serial_tool/docs/jog-check.md`。
+
+- `JOG <vx_mm_s> <vy_mm_s> [<z_counts_s> <arm_counts_s>]`: ホストは押している間50msごとに送る。commandTaskは`CommandQueue`ではなく長さ1・上書きの`SerialJogQueue`へ`JogRequest`を入れ、`ACK QUEUED`は返さない(20HzでLogQueue 24行を溢れさせないため)。引数不正は`NACK_JOG reason=bad_args`。
+- デッドマン: 最後の`JOG`から`SERIAL_JOG_TIMEOUT_MS`(250ms)以内に次が来なければ減速停止(`reason=timeout`)。`JOG 0 0`(全軸0)は即減速停止(`reason=zero`)。
+- 開始条件: alarm(`alarm`)、homing中(`homing`)、ジョブ中(`job_active`)、他の移動実行中(`busy`)は`NACK_JOG reason=...`。XY成分ありでHOMEDでなければ`not_homed`(Z/アームのみは可)。拒否は1回の押下につき1回だけ出し、`JOG 0 0`か250ms超の送信停止(=キーを離した)まで残りを黙って捨てる。`command`/`alarm`/`limit_*`で終わったセッション後も同様(押しっぱなしのキーで後から動き出さない)。
+- ジョグセッション(ジョイスティックと共通、`runJogSession`):
+  - `TEST_MODE`不要。サーボの安全確認(checkReady、待機中のずれ検出、200ms hold check、runaway guard、読出し欠落停止、|abs|<=28000)は`beginJog`/`updateJog`内にあり、テストモードとは独立に毎セッション行う。
+  - HOMEDで始めたセッションはHOMEDを保つ。位置はbackendのステップ数からの推定(`updateMachinePositionEstimateFromBackend`)を正とする。HOMEDでないセッションは従来どおりHOMED=NO(部分的なX_HOMED/Y_HOMEDは解除)。
+  - ソフトリミット減速(HOMED時): 軸ごとに外向き速度vを`v * T + v^2 / (2 * a * JOG_SOFT_LIMIT_BRAKE_RATIO) <= d`に抑える(`T`=`JOG_SOFT_LIMIT_LATENCY_S` 0.1s、`d`=境界までの距離-`JOG_SOFT_LIMIT_STOP_MARGIN_MM` 0.5mm)。「Tの間は今の速度で進み、その後に減速して止まる」距離が残りに収まる速度で、この曲線に沿う減速度はa*ratio以下(モータが追従できる)。マージン内では外向き0、内向きは常に可。ratio 0.5はCoreXYの各モータ独立加減速で軸減速度が最悪1/sqrt(2)になることへの安全率。セッションは終了せず`JOG soft_limit axis=X|Y`を1回出す。実機でX=389.575に停止(100mm/s要求、2026-10-24)。
+  - 2026-10-24変更: 初版の「距離から前回指令速度x40msを引く」方式は境界手前でカーブが急になってモータが追従できず、実機で0.21mm越えた。
+  - 速度上限は合成で`MAX_FEED_MM_MIN/60`。加減速はSerialが`SERIAL_JOG_ACCEL_MM_S2`(600)、ジョイスティックが`JOY_ACCEL_MM_S2`(600)。
+  - ホーム側リミットの処理(ONのリミットへ向かう成分0、新たにONで即停止`limit_x|limit_y`)は従来どおり。
+  - ジョグ中のコマンド: 読み取り系(`POS` `M114` `SERVO_STATUS` `HOME_STATUS` `LIMIT_STATUS` `TMC_STATUS` `JOB_STATUS` `CONFIG` `HELP` `PEN_STATUS`)はmotionTaskのジョグループ内でその場で応答する(`POS`は推定位置と`MOTION=YES`)。`TMC_STATUS`は多レジスタ診断を省略。`STOP`/`ABORT`/`JOB_ABORT`はセッションを終える。その他は止めずに`NACK_<CMD> reason=jog_active`(`XY`は`NACK_XY target=(..) reason=jog_active`)で拒否し、順番待ちにしない。
+  - 優先順位: Serial `JOG`優先。ジョイスティックのセッション中にSerial `JOG`が来たら入力元をSerialへ切り替え、そのセッションの残りはジョイスティック入力を無視する。
+  - 位置通知: ジョグ中`JOG_POS_INTERVAL_MS`(50ms)ごと(締め切り方式で平均20Hz。実機20.1Hz)に`JOG_POS X= Y= VX= VY= Z_ABS= ARM_ABS=`。VX/VYは前回行からの位置変化 [mm/s]。サーボ追跡無効時は`NA`。
+  - ログ: `JOG start vx= vy= z= arm= src=SERIAL|JOY HOMED=`、`JOG end reason=<zero|timeout|idle|link_lost|command|abort|alarm|limit_x|limit_y> X= Y= HOMED= src=`。旧`JOY_JOG start/end`は`JOG start/end`へ統合(`JOY_JOG ignored`は残す)。
+- `STOP`: commandTaskが停止フラグを立て、`STOP`を`CommandQueue`の先頭へ入れる(満杯で入らなければmotionTaskがフラグだけで完了処理する)。
+  - 実行中のXY(timed segment): まだbackendへ投入していない残りを、投入済みsegmentの終端速度(計画速度)から計画加速度で0まで減速するsegment列(`SegmentGenerator::generateStop`)に置き換える。ブロック残りに収まらない場合はブロック終端で止まる(終端速度は計画の出口速度以下)。backendのキューに入っている分は実行してから減速するため、反応はキュー深さ分遅れる。停止位置はbackendのステップ数から求めるので正確で、HOMEDを保つ。止めたXYは`NACK_XY target=(..) reason=stopped X=.. Y=..`、同じバッチの残りブロックも`NACK_XY ... reason=stopped`。
+  - ジョグは減速停止(`JOG end reason=command`)。TEST_A/TEST_B/TEST_JOGは`stopVelocity()`で減速停止(`result=STOPPED reason=stop`)。
+  - フラグが立っている間に取り出した移動系コマンドと、`STOP`処理時にキューに残っている移動系コマンド(`XY` `G0/G1`等のG-code(M114除く) `AB_TIMED` `TEST_*` `SERVO_ANGLE/TURN` `HOME*` `DWELL` `MELODY` `JOB_BEGIN/END` `PENUP/PENDOWN` `ZERO`)は`NACK_<CMD> reason=stopped`で捨てる。それ以外はキューへ戻して順に処理する。
+  - ジョブ中ならジョブを`ABORTED`(`last_error=stopped`)にする。アラームにはしないので、次の`JOB_BEGIN`で再開できる。G-codeを流しているホストは`STOP`の前に送信を止めること。
+  - 応答`STOP complete X= Y= HOMED=`。アラームなし、HOMED不変。
+  - HOME、SERVO_TURN/SERVO_ANGLE、AB_TIMED、MELODY、DWELLは`STOP`で中断しない(`ABORT`を使う)。
+- `ABORT`は従来どおり即時停止・アラーム・HOMED解除。
+- ジョイスティック: `TEST_MODE`不要(TEST_MODE OFFでもXY/Z/アームが動く)。ジョグ中のSerialコマンドでセッションを終えない(旧仕様「PC優先」の終了を廃止)。HOMEDなしでもジョグ可(復旧用)。
+- CONFIGに`JOG serial_timeout_ms= serial_accel= joy_accel= max_speed= soft_limit_brake_ratio= latency_s= margin= jog_pos_ms=`、HELPに`JOG`/`STOP`。
+- motionTaskのスタックを6144→8192(ジョグループ内で読み取り系コマンドを処理するため)。
+
+## 2026-10-24: HOMEなしのジョイスティックジョグの低速制限と警告
+
+- ユーザー指定: HOMEなしでもジョイスティックでXYを動かせるが、遅くする。Core2の画面と音で分かるようにする。
+- HOMEDでない状態で始めたジョイスティックのセッションでは、XYの合成速度を`JOY_UNHOMED_MAX_FEED_MM_MIN`(600mm/min = SLOW)で頭打ちにする。速度段階(FAST/ULTRA等)に関係なく適用。ソフトリミットは効かない(位置が分からないため)。Z/アームは対象外。
+- `MachineState.jog_unhomed`(そのセッション中true)と`jog_unhomed_moving`(XYを駆動中true)をmotionTaskが立て、StatusMessageでuiTaskへ渡す。開始時にログ`JOG unhomed: XY max 600 mm/min, no soft limit (HOME to lift)`。
+- 画面(uiTask、Core 0): 右上の状態ピルをオレンジの`SLOW JOG`、下部にオレンジの帯`NO HOME: SLOW XY, NO SOFT LIMIT`。
+- 音(Core2内蔵スピーカー、uiTask): 開始時に1500Hz→2000Hzの2音、XY駆動中は`UNHOMED_JOG_BEEP_INTERVAL_MS`(700ms)ごとに2000Hz 60msのビープ。`UI_SOUND_ENABLED`、`UI_SOUND_VOLUME`(96/255)で設定。
+- スピーカー: M5Unifiedの`internal_spk`を`UI_SOUND_ENABLED`に連動して有効化(従来は無効)。Core2のスピーカーはI2S(BCLK GPIO12、LRCK GPIO0、DATA GPIO2)で、motion/TMC/サーボ/リミットのピンとは共用しない。GPIO0/2はboot strapだが起動後のI2S出力でありmotion出力ではない。
+- Serial `JOG`はHOMED必須のため対象外(HOMEDなしのSerialセッションはXYを無視する)。
+
+## 2026-10-24: Atom JoyStick 速度MAX追加、左ボタンでHOME、LCD刷新(プロトコルv4)
+
+- ユーザー要望: ULTRAより速い速度、Atomのテストモード切替は不要、AtomからHOME、AtomのLCDを見やすく。
+- プロトコルv4(`JOY_PROTOCOL_VERSION`=4)。版違いのパケットは破棄するため、Core2とAtomの両方に書き込むこと。
+  - 速度段階はflags bit0-2(`JOY_FLAG_SPEED_MASK`=0x07)、5段階: SLOW 600 / FAST 3000 / VERY FAST 4500 / ULTRA 7500 / MAX 12000 mm/min(`JOY_MAX_FEED_MM_MIN`)。範囲外の値は最上段として扱う(`joySpeedLevel()`)。MAXの減速停止距離は約33mm(600mm/s^2)。経緯: 12000→ファーム上限15909へ上げたところ実機で脱調、ユーザー確認で12000までは問題なしのため12000に戻した。HOMEDならソフトリミット減速が効く。HOMEDでなければ600mm/minで頭打ち。
+  - `JoyCommandPacket.test_mode_toggle_count`を`home_count`へ。左ボタン1秒長押しでCore2が`HOME`をCommandQueueへ入れる(ログ`JOY button: HOME`)。AtomからのTEST_MODE切替は廃止(Core2のLCD BtnB長押しとSerialの`TEST_MODE`は残る)。ジョグ中は`NACK_HOME reason=jog_active`(スティックを離して300ms後に押す)。
+  - 状態パケットのflagsに`JOY_STATUS_HOMING`(0x20)、`JOY_STATUS_UNHOMED_JOG`(0x40)を追加。
+- Atom LCD(128x128、100ms更新): 上部に状態チップ(NO LINK灰/ALARM赤/HOMING黄/SLOW JOG橙/JOG水色/NEED HOME青/READY緑)と電池残量(3.4〜4.1V)、中央にX/Y(HOMED前は灰色)、速度名と5段バー(HOMEDでなければ`NO HOME:SLOW`)、左右スティックの位置表示、下段に長押しの進行バー(`HOME...`/`ALARM CLEAR...`)・直前のイベント・操作ヒント`L:HOME  R:STOP`。スティックを倒したまま起動した場合は`RELEASE STICKS AND REBOOT`。
+
+## 2026-10-25: ジョグのモータSTEP周波数上限と脱調チェック用ログ
+
+- ジョグ(ジョイスティック/Serial `JOG`共通)は、XY速度に加えて各モータのSTEP周波数を`JOG_MAX_MOTOR_STEPS_S`(=JOY_MAX_FEED 12000mm/minのX単独時 = 16000 steps/s)以下に抑える。CoreXYは斜め45度で片側モータが√2倍速くなるため、方向を保ったまま全体を縮める(斜めは合成約8485mm/min、各軸100mm/s)。ソフトリミット減速の後に適用する。
+- 実機: 純X 15909mm/min(21200 steps/s)で脱調、12000mm/min(16000 steps/s)で問題なし。
+- HOMEの`HOME_X|HOME_Y set zero ...`行の末尾に`before_zero=`を追加。スイッチが反応した時点の論理位置(前回HOMEからステップ数で追跡、ZEROでリセット)で、脱調がなければ約0(±0.05mm程度)、ずれは失った距離。先頭トークンは不変。

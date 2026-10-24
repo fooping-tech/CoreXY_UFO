@@ -214,9 +214,11 @@ static_assert(TEST_JOG_MAX_FEED_MM_MIN <= MAX_FEED_MM_MIN,
               "TEST_JOG_MAX_FEED_MM_MIN must be <= MAX_FEED_MM_MIN");
 
 // ============================================================================
-// Atom JoyStick (ESP-NOW, test mode only)
+// Atom JoyStick (ESP-NOW)
 // ============================================================================
-// 簡易テスト用。本番の指示はPCからUSBシリアル。テストモード中だけ有効。
+// 簡易操作用。本番の指示はPCからUSBシリアル。
+// 2026-10-24: TEST_MODE不要に変更(CoreXY_UFO_Game HANDOFF_FIRMWARE_JOG §3.0)。
+// HOMEDのジョグはHOMEDを保ちソフトリミット手前で止まる。シリアルJOG中は無視する。
 constexpr bool JOYSTICK_ENABLED = true;
 // ESP-NOWのWi-Fiチャネルは両ファームウェア共通のJoystickProtocol.hで定義する。
 // 受け付けるAtomのMAC。全0なら起動後に最初に受信したAtomへ固定する(CONFIGに表示)。
@@ -229,8 +231,25 @@ constexpr float JOY_SLOW_FEED_MM_MIN = 600.0f;
 constexpr float JOY_FAST_FEED_MM_MIN = 3000.0f;
 constexpr float JOY_VERY_FAST_FEED_MM_MIN = JOY_FAST_FEED_MM_MIN * 1.5f;  // 4500
 constexpr float JOY_ULTRA_FEED_MM_MIN = JOY_FAST_FEED_MM_MIN * 2.5f;      // 7500
+// 2026-10-24: ULTRAより上のMAXを追加(ユーザー要望)。15909(ファーム上限)では実機で脱調、
+// 12000までは問題なし(ユーザー確認)のため12000。減速停止距離 v^2/2a = 約33mm(600mm/s^2)。
+constexpr float JOY_MAX_FEED_MM_MIN = 12000.0f;
+// ジョグのモータSTEP周波数上限 [steps/s]。X/Y単独でJOY_MAX_FEEDのときの値(16000)。
+// CoreXYは斜め45度で片側モータが√2倍速くなるため、斜めジョグはこの上限で約8485mm/minに抑える。
+// 実機: 純X 15909mm/min(21200 steps/s)で脱調、12000(16000 steps/s)で問題なし。
+constexpr float JOG_MAX_MOTOR_STEPS_S = JOY_MAX_FEED_MM_MIN / 60.0f * STEPS_PER_MM;
 // XYジョグの加減速 [mm/s^2]。減速停止距離 v^2/2a: FAST約2mm、VERY FAST約4.7mm、ULTRA約13mm。
 constexpr float JOY_ACCEL_MM_S2 = 600.0f;
+// HOMEなしのXYジョグの速度上限 [mm/min]。位置が分からずソフトリミットが効かないため遅くする。
+// 2026-10-24 ユーザー指定(HOMEなしでも動かせるが遅く)。速度段階に関係なくこの値で頭打ち。
+constexpr float JOY_UNHOMED_MAX_FEED_MM_MIN = JOY_SLOW_FEED_MM_MIN;  // 600
+// HOMEなしジョグ中のCore2スピーカー警告。開始時に2音、XY移動中は間隔ごとに短いビープ。
+// スピーカーはI2S(GPIO12/0/2)。motion/TMC/サーボ/リミットのピンとは共用しない。
+constexpr bool UI_SOUND_ENABLED = true;
+constexpr uint8_t UI_SOUND_VOLUME = 96;  // 0..255
+constexpr uint16_t UNHOMED_JOG_BEEP_HZ = 2000;
+constexpr uint32_t UNHOMED_JOG_BEEP_MS = 60;
+constexpr uint32_t UNHOMED_JOG_BEEP_INTERVAL_MS = 700;
 // スティックのデッドゾーン(フルスケール比)。XY用と、サーボ(右スティック)用。
 // サーボ側は中央付近のわずかなズレでジョグ開始(200msのhold check)しないよう大きめにする。
 constexpr float JOY_DEADZONE = 0.08f;
@@ -245,12 +264,40 @@ constexpr uint32_t JOY_SESSION_PERIOD_MS = 20;
 constexpr uint32_t JOY_SESSION_IDLE_EXIT_MS = 300;
 // サーボジョグのgoal先行時間 [ms]。速度 x 先行時間だけ先にgoalを置く。
 constexpr uint32_t JOY_SERVO_LEAD_MS = 200;
-static_assert(JOY_ULTRA_FEED_MM_MIN <= MAX_FEED_MM_MIN,
-              "JOY_ULTRA_FEED_MM_MIN must stay within MAX_FEED_MM_MIN");
+static_assert(JOY_UNHOMED_MAX_FEED_MM_MIN > 0.0f &&
+                  JOY_UNHOMED_MAX_FEED_MM_MIN <= JOY_SLOW_FEED_MM_MIN,
+              "un-homed joystick jog must not be faster than SLOW");
+static_assert(JOY_MAX_FEED_MM_MIN <= MAX_FEED_MM_MIN,
+              "JOY_MAX_FEED_MM_MIN must stay within MAX_FEED_MM_MIN");
 static_assert(JOY_SLOW_FEED_MM_MIN > 0.0f && JOY_SLOW_FEED_MM_MIN <= JOY_FAST_FEED_MM_MIN &&
                   JOY_FAST_FEED_MM_MIN <= JOY_VERY_FAST_FEED_MM_MIN &&
-                  JOY_VERY_FAST_FEED_MM_MIN <= JOY_ULTRA_FEED_MM_MIN,
-              "joystick feeds must increase SLOW <= FAST <= VERY FAST <= ULTRA");
+                  JOY_VERY_FAST_FEED_MM_MIN <= JOY_ULTRA_FEED_MM_MIN &&
+                  JOY_ULTRA_FEED_MM_MIN <= JOY_MAX_FEED_MM_MIN,
+              "joystick feeds must increase SLOW <= FAST <= VERY FAST <= ULTRA <= MAX");
+
+// ============================================================================
+// Serial JOG / STOP (CoreXY_UFO_Game HANDOFF_FIRMWARE_JOG)
+// ============================================================================
+// デッドマン: 最後のJOGからこの時間内に次のJOGが来なければ減速停止する [ms]。
+// ホストは押している間50ms(20Hz)ごとに送る。
+constexpr uint32_t SERIAL_JOG_TIMEOUT_MS = JOY_LINK_TIMEOUT_MS;
+// シリアルJOGのXY加減速 [mm/s^2]。ジョイスティックと同じ。
+constexpr float SERIAL_JOG_ACCEL_MM_S2 = 600.0f;
+// ジョグ中のJOG_POS出力周期 [ms](20Hz)。0で出力しない。
+constexpr uint32_t JOG_POS_INTERVAL_MS = 50;
+// HOMED中のソフトリミット減速。外向き速度vを v*T + v^2/(2*a*ratio) <= d に抑える
+// (d=境界までの距離、T=JOG_SOFT_LIMIT_LATENCY_S)。この曲線に沿う減速度はa*ratio以下。
+// CoreXYは各モータが独立に加減速するため、軸の減速度は最悪で公称の1/sqrt(2)になる。
+// 0.5はそれより小さく取った安全率。Tは指令更新周期20ms+位置推定とFastAccelStepperの遅れ。
+// 2026-10-24: 前回指令速度xT を距離から引く方式は実機で0.21mm越えた(カーブが急すぎ)ため変更。
+constexpr float JOG_SOFT_LIMIT_BRAKE_RATIO = 0.5f;
+constexpr float JOG_SOFT_LIMIT_LATENCY_S = 0.100f;
+// 境界の手前に取る余裕 [mm]。遅れのある最後の接近で越えないため。停止位置は境界の約0.3〜0.5mm手前。
+constexpr float JOG_SOFT_LIMIT_STOP_MARGIN_MM = 0.5f;
+static_assert(SERIAL_JOG_ACCEL_MM_S2 > 0.0f && SERIAL_JOG_ACCEL_MM_S2 <= MAX_ACCEL_MM_S2,
+              "SERIAL_JOG_ACCEL_MM_S2 must be in (0, MAX_ACCEL_MM_S2]");
+static_assert(JOG_SOFT_LIMIT_BRAKE_RATIO > 0.0f && JOG_SOFT_LIMIT_BRAKE_RATIO < 0.7071f,
+              "soft limit braking must stay below the CoreXY worst-case axis deceleration");
 
 // ペン上げ/下げのサーボ角度 [deg]。
 // 決め方: 機構に合わせて、紙を擦らない上げ角と十分に接地する下げ角を実測する。

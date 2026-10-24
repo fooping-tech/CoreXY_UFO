@@ -11,6 +11,7 @@ QueueHandle_t status_queue = nullptr;
 QueueHandle_t log_queue = nullptr;
 QueueHandle_t jog_queue = nullptr;
 QueueHandle_t joystick_status_queue = nullptr;
+QueueHandle_t serial_jog_queue = nullptr;
 QueueHandle_t led_command_queue = nullptr;
 MachineState machine_state;
 DiagnosticsState diagnostics_state;
@@ -26,10 +27,21 @@ MotorMelodyController motor_melody_controller;
 HomingController homing_controller;
 JobController job_controller;
 volatile bool motion_abort_requested = false;
+volatile bool motion_stop_requested = false;
+volatile bool stop_command_lost = false;
 
 void requestMotionAbort() { motion_abort_requested = true; }
 bool isMotionAbortRequested() { return motion_abort_requested; }
 void clearMotionAbort() { motion_abort_requested = false; }
+void requestMotionStop() { motion_stop_requested = true; }
+bool isMotionStopRequested() { return motion_stop_requested; }
+void clearMotionStop() { motion_stop_requested = false; }
+void markStopCommandLost() { stop_command_lost = true; }
+bool takeStopCommandLost() {
+  if (!stop_command_lost) return false;
+  stop_command_lost = false;
+  return true;
+}
 
 void logMessage(const char* format, ...) {
   LogMessage message{};
@@ -63,6 +75,7 @@ void setup() {
   led_command_queue = xQueueCreate(LED_COMMAND_QUEUE_LENGTH, sizeof(LedCommand));
   jog_queue = xQueueCreate(1, sizeof(JogRequest));
   joystick_status_queue = xQueueCreate(1, sizeof(StatusMessage));
+  serial_jog_queue = xQueueCreate(1, sizeof(JogRequest));
 
   safety_manager.begin();
   // UART1 pen initialization is owned by motionTask on Core 1.

@@ -125,7 +125,8 @@ python tools/serial_tool/serial_send.py \
 | [STS3020 Check](docs/sts3020-check.md) | Core2 UART1での半二重TTLサーボ通信・位置診断・安全な微動 | `examples/sts3020_check.csv` |
 | [Servo On/Off Check](docs/servo-on-off-check.md) | STS3020ペン上げ/下げサーボ角度と配線 | `examples/servo_check.csv` |
 | [LED Check](docs/led-check.md) | 現行STS3020構成では**無効**（GPIO33競合） | `examples/led_check.csv`（旧構成専用） |
-| [Atom JoyStick Check](docs/joystick-check.md) | Atom JoyStick(ESP-NOW)でテストモードのXY・Z・アームを連続ジョグ | `examples/joystick_check.csv` |
+| [Atom JoyStick Check](docs/joystick-check.md) | Atom JoyStick(ESP-NOW)でXY・Z・アームを連続ジョグ(TEST_MODE不要) | `examples/joystick_check.csv` |
+| [Serial JOG / STOP Check](docs/jog-check.md) | PCからの速度ジョグ`JOG`(デッドマン、ソフトリミット減速)と非アラーム停止`STOP` | `examples/jog_check.csv`, `jog_check.py` |
 | [WebUI Test Mode Check](docs/webui-test-mode-check.md) | WebUI `Test`タブ/Serialでホーミングなしのリミット確認、モータ・X/Y移動、サーボID1/2の角度・回転 | `examples/webui_test_mode_check.csv` |
 | [STS3020 Standalone Test Check](docs/sts3020-test-check.md) | STS3020単体の通信・微小JOG確認(専用`m5stack-core2-sts3020-test` firmware) | `examples/sts3020_test_check.csv` |
 | [Melody Check](docs/melody-check.md) | TMC UART、Aモータ、診断メロディprofile | `examples/melody_check.csv` |

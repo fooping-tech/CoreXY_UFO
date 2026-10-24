@@ -2573,7 +2573,7 @@ Z軸構想: 紐とドラム、ストローク800mm、荷重400g。STS3020(7.4V�
 - [x] XYジョグ速度を3000/600mm/min、加速度600mm/s^2へ変更(ユーザー要望)
 - [x] 速度4段階(SLOW 600 / FAST 3000 / VERY FAST 4500 / ULTRA 7500 mm/min)、プロトコルv2(ユーザー要望)
 - [ ] FAST/VERY FAST/ULTRAでの脱調・停止距離・リミット即停止時の衝撃を実機確認(ULTRAは高速スイープ確認範囲5000mm/minを超える)
-- [ ] ジョグ中にSerialコマンドを送ったときの`reason=serial_command`停止
+- [ ] ~~ジョグ中にSerialコマンドを送ったときの`reason=serial_command`停止~~ 2026-10-24に廃止(ジョグ中のSerialコマンドではセッションを終えない)
 
 未解決リスク:
 
@@ -2589,6 +2589,7 @@ Z軸構想: 紐とドラム、ストローク800mm、荷重400g。STS3020(7.4V�
 - [x] ソフトリミットをX 390 / Y 200mmへ(ユーザー指定)。WebUI SOFT_LIMIT、テキスト生成上限も同期
 - [ ] HOME後、XY 390 0 / XY 0 200 / XY 390 200 が機械端に当たらず到達できることを実機確認
 - リスク: テストモードのジョグには奥側の制限がない(スイッチなし)。ULTRA等の高速で奥へ行き過ぎると衝突する。
+  - 2026-10-24: HOMEDで始めたジョグはソフトリミット手前で減速停止するよう対策。HOMEDなしのジョグには引き続き奥側の制限がない。
 
 ## 2026-10-22: ジョイスティックのXYラグ対策
 
@@ -2602,3 +2603,76 @@ Z軸構想: 紐とドラム、ストローク800mm、荷重400g。STS3020(7.4V�
 - [x] 実機Serial: ID1 ±1/4・±1・±3回転、ID2 ±1/4・±1回転すべてPASS(3回転5.6s)
 - [ ] 負荷(Zドラム400g、アーム)付きで速度に追従できるか、温度、電流
 - [ ] ジョイスティックでの2400 counts/sジョグの操作感
+
+## 2026-10-24: Serial速度ジョグ`JOG`と非アラーム停止`STOP`(CoreXY_UFO_Game HANDOFF_FIRMWARE_JOG)
+
+依頼: https://github.com/fooping-tech/CoreXY_UFO_Game/blob/main/docs/HANDOFF_FIRMWARE_JOG.md
+仕様: SPEC.md「2026-10-24: Serial速度ジョグ`JOG`と非アラーム停止`STOP`」。手順: `tools/serial_tool/docs/jog-check.md`。
+
+- [x] `JOG`/`STOP`のparser、`SerialJogQueue`(長さ1上書き)、commandTaskでのSTOP即時フラグ+キュー先頭投入
+- [x] ジョグセッションをジョイスティック/Serial共通化。TEST_MODE不要、HOMED保持、ソフトリミット減速、ジョグ中の読み取り系即答・その他`NACK reason=jog_active`、Serial優先、`JOG_POS` 20Hz
+- [x] Serial JOGの受付判定(not_homed/alarm/homing/job_active/busy/bad_args、押下ごとに1回だけNACK、終了後のキー離し待ち)
+- [x] STOP: timed segmentの残りを減速ランプへ置換(`SegmentGenerator::generateStop`)、移動系キューの破棄、ジョブABORTED、`STOP complete`
+- [x] nativeテスト: 速度clamp、ソフトリミット速度(最悪減速度モデルの閉ループで390mmを越えない)、STOPランプ(距離v^2/2a、残りstepを越えない、速度単調減少)
+- [x] ビルド: m5stack-core2 / m5stack-core2-sim / m5stack-core2-hwtest SUCCESS
+- [x] 書き込み(m5stack-core2、/dev/cu.usbserial-5B1F0093251)
+- [x] 実機: SELFTEST PASS、`jog_check.csv` 全行OK(CONFIGのJOG行、HELP、待機中STOPで`STOP complete`・ALARM=NO)
+- [x] 実機: 受け入れ条件8(HOMEDなしの`JOG 50 0` → `NACK_JOG reason=not_homed`)PASS
+- [x] 実機(VM投入後、`jog_check.py` 14/14 PASS): #1 dX=101.3mm `reason=zero HOMED=YES`、#2 最後のJOGから349msで`reason=timeout`、#5 `NACK_XY reason=jog_active`・後から実行されない、#5b POS即答`MOTION=YES`、#3 X最大389.575(390以下)、#6 STOPで`NACK_XY reason=stopped`→`STOP complete X=336.713 HOMED=YES`・続くXY OK、#7 JOG_POS 20.1Hz・POS 38/38・その後ACK_XY、#11 TEST_MODE OFFでZサーボジョグ、#4 ABORTで`reason=abort`・ALARM・HOMED=NO
+- [x] 1回目の実機で見つかった問題の修正: ソフトリミットで0.21mm越え(減速カーブが急すぎ)→`v*T+v^2/2a<=d-margin`へ変更。JOG_POSが16.5Hz(20msループで60ms間隔)→締め切り方式
+- [ ] 実機確認: ジョイスティック(受け入れ条件9、10)
+- [ ] CoreXY_UFO_Game側の`FakeFirmware`/`protocol.py`更新(ゲーム側リポジトリ)
+
+HANDOFF §7への回答(ゲーム側へ返す内容):
+
+1. HOMEDのまま速度ジョグ: 可。位置はbackendが実際に出したSTEP数から計算しており、XY移動と同じくオープンループ。脱調しない限り正確。速度上限は`MAX_FEED_MM_MIN`(高速スイープ確認範囲は5000mm/minまで、ULTRA 7500は未確認)。加速度600mm/s^2は通常XY(1000)より低い。脱調が出たら速度上限を下げる。
+2. STOP後の位置: 正確。停止位置はプランナーの計画値ではなくbackendのステップ数から求め、プランナー/segmentキューは破棄するので、次の`XY`は実位置から計画される。
+3. TEST_MODEの役割: サーボの保持チェック等は`beginJog`/`updateJog`内でジョグ開始ごとに実施済み(テストモードとは独立)なので代替不要。ジョイスティックの「本番で使わない」前提は、ジョブ中は拒否・Serial JOG優先・ジョグ中のSerial移動コマンドは拒否、で置き換えた。
+4. 読み取り系の即答: motionTask(Core 1)のジョグループ内で処理する方式。`machine_state`はmotionTaskだけが読み書きするため排他不要。ループ周期20msなので応答遅れは最大約20ms(CONFIG等の長い出力は除く)。
+5. 同時入力: Serial優先。ジョイスティックのセッション中にSerial `JOG`が来たら切り替え、以後そのセッションではジョイスティック入力を無視。
+
+未解決リスク:
+
+- STOPはbackend(FastAccelStepper)のキューに入っている分を実行してから減速を始めるため、停止距離はキュー深さ分長くなる(高速時に要実測)。
+- JOGのソフトリミット減速の実機確認はX+方向・100mm/sのみ。Y方向、0側、125mm/s以上、斜め移動は未確認。
+- ジョグ中のTMC_STATUSはUART読出しでジョグループが数ms止まる。デッドマン250msには十分小さいが未測定。
+- `JOG_POS`(20Hz)とPOS(10Hz)を同時に流した時のLogQueue/USB帯域は計算上約35%で未測定。
+- ジョイスティックがTEST_MODEなしで動くため、ゲーム中にAtomを触ると動き出す。Serial JOGセッション中とジョブ中は無視されるが、ゲーム側の待機中は動く。不要なら`JOYSTICK_ENABLED=false`。
+
+## 2026-10-24: HOMEなしのジョイスティックジョグの低速制限と警告(ユーザー要望)
+
+背景: 受け入れテスト後(ABORTでHOMED解除)にジョイスティックで動かすとソフトリミットが効かないと指摘。HOMEDなしのジョグにソフトリミットをかけない仕様どおりだったが、HOMEなしでも動かせる代わりに遅くし、画面と音で知らせることになった。
+
+- [x] HOMEDなしのジョイスティックXYを600mm/minで頭打ち(`JOY_UNHOMED_MAX_FEED_MM_MIN`)
+- [x] `MachineState.jog_unhomed`/`jog_unhomed_moving`、LCDの`SLOW JOG`ピルと警告帯、スピーカーの開始2音と移動中ビープ
+- [x] Core2スピーカーを有効化(`UI_SOUND_ENABLED`)
+- [x] ビルド(m5stack-core2 / sim)、書き込み、SELFTEST PASS
+- [ ] 実機(ジョイスティック): HOMEなしで最高速段階でも遅い、画面表示、音。HOME後は表示も音も出ずソフトリミット手前で止まる
+
+未解決リスク:
+
+- スピーカー(I2S、DMA)有効化がステップ生成・LCD・UARTに与える影響は未測定。問題が出たら`UI_SOUND_ENABLED=false`。
+- 音量96/255の聞こえ方は未確認。
+
+## 2026-10-24: Atom JoyStick 速度MAX、左ボタンでHOME、LCD刷新(プロトコルv4、ユーザー要望)
+
+- [x] 速度5段階目MAX(プロトコルv4、3bit速度フィールド、範囲外は最上段)。nativeテスト追加。12000→ユーザー要望で上限15909mm/min(265mm/s)へ
+- [x] 左ボタン1秒長押し=HOME(TEST_MODE切替を廃止)、状態にHOMING/UNHOMED_JOGフラグ
+- [x] Atom LCD刷新(状態チップ、電池、X/Y、速度バー、スティック表示、長押し進行バー)
+- [x] ビルド(m5stack-core2 / atoms3-joystick)、Core2書き込み、SELFTEST PASS、CONFIGに`feed=.../12000`
+- [x] Atom書き込み(Core2のUSBケーブルで認識、`/dev/cu.usbmodem111401`)。Core2とリンク(`atom_mac=48:CA:43:39:ED:C4`)
+- [x] 実機ログ: HOMEなしジョイスティックでXYが10.0mm/s(600mm/min)で頭打ち、斜めも合成10mm/s、TEST_MODEなしでZサーボジョグ
+- [ ] 実機: MAXでの脱調・停止距離、左ボタン長押しでHOME、LCDの見え方
+
+未解決リスク:
+
+- MAX 15909mm/minは実機で確認した高速範囲(5000mm/min)を大きく超える。脱調したら`JOY_MAX_FEED_MM_MIN`を下げる。これ以上速くするには`MAX_MOTOR_SPEED_STEPS_S`(30000)を上げる必要があり、XY/G-codeの上限も変わる。
+- Atomから機械が動くHOMEを起動できるようになった。1秒長押しが必要で、ジョブ中・alarm中はCore2側で拒否される。
+
+## 2026-10-25: ジョグMAXの脱調対策
+
+- [x] MAX 15909mm/minで脱調(ユーザー報告)→ 12000に戻す(ユーザー確認で12000までは問題なし)
+- [x] ジョグのモータSTEP周波数上限`JOG_MAX_MOTOR_STEPS_S`(16000)。斜めは方向を保ったまま縮める
+- [x] HOMEログに`before_zero=`(脱調量の確認用)
+- [x] 実機: HOME → 純X 200mm/s(12000)で60〜300mmを3往復 → 斜め全速要求を2往復 → HOMEで`before_zero` X=-0.025 / Y=0.000(初回HOMEのばらつき-0.050と同程度、脱調なし)。斜めはVX=VY=100.0mm/sで頭打ち、Y上限付近ではYがソフトリミットで減速しXが加速(壁沿いのすべり)
+- [ ] ジョイスティックでの長時間・負荷(Zドラム)付きの高速ジョグ

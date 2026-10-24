@@ -30,6 +30,8 @@ enum class CommandType {
   LIMIT_STATUS,
   ALARM_CLEAR,
   ABORT,
+  STOP,
+  JOG,
   JOB_BEGIN,
   JOB_END,
   JOB_ABORT,

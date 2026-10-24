@@ -1,4 +1,4 @@
-// Atom JoyStick (v1.0, AtomS3) remote for the CoreXY UFO test mode.
+// Atom JoyStick (v1.0, AtomS3) remote for the CoreXY UFO.
 // Built only by the `atoms3-joystick` PlatformIO env.
 //
 // Reads both sticks and buttons from the on-board STM32 (I2C 0x59) and sends
@@ -11,9 +11,9 @@
 //   Right stick up/down Z drum (servo ID 1)
 //   Right stick L/R     arm (servo ID 2)
 //   Right button        emergency stop (ABORT)
-//   Left button 1 s     toggle test mode
+//   Left button 1 s     HOME
 //   Screen button 1 s   ALARM_CLEAR
-//   Left stick press    speed SLOW -> FAST -> VERY FAST -> ULTRA -> SLOW
+//   Left stick press    speed SLOW -> FAST -> VERY FAST -> ULTRA -> MAX -> SLOW
 // Keep the sticks released while powering on (center calibration).
 
 #include <Arduino.h>
@@ -36,7 +36,7 @@ constexpr int ADC_FULL_DEFLECTION = 1700;
 // A center reading this far off means a stick was held at power-on.
 constexpr int ADC_CENTER_SUSPECT = 400;
 constexpr uint32_t SEND_PERIOD_MS = 20;
-constexpr uint32_t DISPLAY_PERIOD_MS = 200;
+constexpr uint32_t DISPLAY_PERIOD_MS = 100;
 constexpr uint32_t STATUS_TIMEOUT_MS = 500;
 constexpr uint32_t LONG_PRESS_MS = 1000;
 constexpr uint8_t SDA_PIN = 38;
@@ -147,7 +147,7 @@ void sendPacket() {
 
   if (buttonPressed(BUTTON_B) && !right_button_was_pressed) ++packet.estop_count;
   right_button_was_pressed = buttonPressed(BUTTON_B);
-  if (longPress(left_button, buttonPressed(BUTTON_A))) ++packet.test_mode_toggle_count;
+  if (longPress(left_button, buttonPressed(BUTTON_A))) ++packet.home_count;
   M5.update();
   if (longPress(screen_button, M5.BtnA.isPressed())) ++packet.alarm_clear_count;
   const bool left_stick = buttonPressed(BUTTON_1);
@@ -179,6 +179,138 @@ void sendPacket() {
   esp_now_send(target, reinterpret_cast<const uint8_t*>(&packet), sizeof(packet));
 }
 
+// ---------------------------------------------------------------------------
+// LCD (128 x 128)
+// ---------------------------------------------------------------------------
+// Status chip + battery / X Y / speed bar / both sticks / bottom line
+// (long-press progress, last event, or a control hint).
+
+constexpr int SCREEN_W = 128;
+
+void drawStatusChip(const JoyStatusPacket& shown, bool linked) {
+  const char* text = "READY";
+  uint16_t color = TFT_GREEN;
+  if (!linked) {
+    text = "NO LINK";
+    color = TFT_DARKGREY;
+  } else if (shown.flags & JOY_STATUS_ALARM) {
+    text = "ALARM";
+    color = TFT_RED;
+  } else if (shown.flags & JOY_STATUS_HOMING) {
+    text = "HOMING";
+    color = TFT_YELLOW;
+  } else if (shown.flags & JOY_STATUS_UNHOMED_JOG) {
+    text = "SLOW JOG";
+    color = TFT_ORANGE;
+  } else if (shown.flags & JOY_STATUS_JOG_ACTIVE) {
+    text = "JOG";
+    color = TFT_CYAN;
+  } else if (!(shown.flags & JOY_STATUS_HOMED)) {
+    text = "NEED HOME";
+    color = TFT_BLUE;
+  }
+  canvas.fillRoundRect(0, 0, 94, 18, 5, color);
+  canvas.setFont(&fonts::Font2);
+  canvas.setTextColor(color == TFT_YELLOW || color == TFT_CYAN || color == TFT_GREEN ||
+                              color == TFT_ORANGE
+                          ? TFT_BLACK
+                          : TFT_WHITE);
+  canvas.setTextDatum(middle_center);
+  canvas.drawString(text, 47, 9);
+}
+
+void drawBattery(uint16_t battery_mv) {
+  // 1S LiPo: 3.4 V empty .. 4.1 V full.
+  int percent = (static_cast<int>(battery_mv) - 3400) * 100 / 700;
+  if (percent < 0) percent = 0;
+  if (percent > 100) percent = 100;
+  const uint16_t color = percent > 40 ? TFT_GREEN : percent > 15 ? TFT_YELLOW : TFT_RED;
+  canvas.drawRect(98, 3, 26, 12, TFT_LIGHTGREY);
+  canvas.fillRect(124, 6, 3, 6, TFT_LIGHTGREY);
+  canvas.fillRect(100, 5, 22 * percent / 100, 8, color);
+}
+
+void drawPosition(const JoyStatusPacket& shown, bool linked) {
+  const bool valid = linked && (shown.flags & JOY_STATUS_HOMED);
+  canvas.setFont(&fonts::Font0);
+  canvas.setTextSize(2);
+  canvas.setTextDatum(top_left);
+  canvas.setTextColor(valid ? TFT_WHITE : TFT_DARKGREY);
+  char text[16];
+  snprintf(text, sizeof(text), "X%6.1f", linked ? shown.x_mm : 0.0f);
+  canvas.drawString(text, 2, 23);
+  snprintf(text, sizeof(text), "Y%6.1f", linked ? shown.y_mm : 0.0f);
+  canvas.drawString(text, 2, 41);
+  canvas.setTextSize(1);
+}
+
+void drawSpeed(const JoyStatusPacket& shown, bool linked) {
+  static const uint16_t LEVEL_COLORS[JOY_SPEED_LEVEL_COUNT] = {
+      TFT_CYAN, TFT_GREEN, TFT_YELLOW, TFT_ORANGE, TFT_RED};
+  const uint8_t level = joySpeedLevel(speed_level);
+  canvas.setFont(&fonts::Font0);
+  canvas.setTextDatum(top_left);
+  canvas.setTextColor(LEVEL_COLORS[level]);
+  canvas.drawString(joySpeedLevelName(level), 2, 61);
+  // Without HOME the Core2 caps XY at SLOW whatever the level.
+  if (linked && !(shown.flags & JOY_STATUS_HOMED)) {
+    canvas.setTextColor(TFT_ORANGE);
+    canvas.setTextDatum(top_right);
+    canvas.drawString("NO HOME:SLOW", SCREEN_W - 1, 61);
+  }
+  constexpr int SEG_W = 24;
+  for (int i = 0; i < JOY_SPEED_LEVEL_COUNT; ++i) {
+    const int x = 1 + i * (SEG_W + 1);
+    if (i <= level) canvas.fillRect(x, 71, SEG_W, 6, LEVEL_COLORS[level]);
+    else canvas.drawRect(x, 71, SEG_W, 6, TFT_DARKGREY);
+  }
+}
+
+void drawStick(int cx, int cy, int16_t x, int16_t y, const char* label) {
+  constexpr int R = 13;
+  canvas.drawCircle(cx, cy, R, TFT_DARKGREY);
+  canvas.drawFastHLine(cx - 3, cy, 7, TFT_DARKGREY);
+  canvas.drawFastVLine(cx, cy - 3, 7, TFT_DARKGREY);
+  const bool active = x != 0 || y != 0;
+  const int dx = static_cast<int>(x) * (R - 3) / JOY_AXIS_FULL_SCALE;
+  const int dy = -static_cast<int>(y) * (R - 3) / JOY_AXIS_FULL_SCALE;
+  canvas.fillCircle(cx + dx, cy + dy, 3, active ? TFT_WHITE : TFT_DARKGREY);
+  canvas.setFont(&fonts::Font0);
+  canvas.setTextColor(TFT_LIGHTGREY);
+  canvas.setTextDatum(middle_left);
+  canvas.drawString(label, cx + R + 3, cy);
+}
+
+// Fraction of LONG_PRESS_MS a button has been held (0 when not held).
+float longPressProgress(const Button& button) {
+  if (!button.pressed || button.long_fired) return 0.0f;
+  const float held = static_cast<float>(millis() - button.since_ms) / LONG_PRESS_MS;
+  return held > 1.0f ? 1.0f : held;
+}
+
+void drawBottomLine(const JoyStatusPacket& shown, bool linked) {
+  const float home = longPressProgress(left_button);
+  const float clear = longPressProgress(screen_button);
+  canvas.setFont(&fonts::Font0);
+  canvas.setTextDatum(middle_center);
+  if (home > 0.0f || clear > 0.0f) {
+    const float progress = home > 0.0f ? home : clear;
+    const uint16_t color = home > 0.0f ? TFT_YELLOW : TFT_SKYBLUE;
+    canvas.drawRect(0, 114, SCREEN_W, 14, color);
+    canvas.fillRect(1, 115, static_cast<int>((SCREEN_W - 2) * progress), 12, color);
+    canvas.setTextColor(TFT_BLACK);
+    canvas.drawString(home > 0.0f ? "HOME..." : "ALARM CLEAR...", SCREEN_W / 2, 121);
+    return;
+  }
+  if (linked && shown.last_result[0] != '\0') {
+    canvas.setTextColor(TFT_LIGHTGREY);
+    canvas.drawString(shown.last_result, SCREEN_W / 2, 121);
+  } else {
+    canvas.setTextColor(TFT_DARKGREY);
+    canvas.drawString("L:HOME  R:STOP", SCREEN_W / 2, 121);
+  }
+}
+
 void drawStatus() {
   JoyStatusPacket shown{};
   bool linked = false;
@@ -188,37 +320,22 @@ void drawStatus() {
   portEXIT_CRITICAL(&status_mux);
 
   canvas.fillSprite(TFT_BLACK);
-  canvas.setTextSize(1);
-  canvas.setCursor(0, 0);
-  canvas.setTextColor(TFT_CYAN);
-  canvas.println("UFO JOY");
-  canvas.setTextColor(linked ? TFT_GREEN : TFT_RED);
-  canvas.printf("Link: %s\n", linked ? "OK" : "NO");
-  canvas.setTextColor((shown.flags & JOY_STATUS_TEST_MODE) && linked ? TFT_YELLOW
-                                                                     : TFT_WHITE);
-  canvas.printf("TEST: %s\n", (shown.flags & JOY_STATUS_TEST_MODE) && linked ? "ON" : "OFF");
-  canvas.setTextColor((shown.flags & JOY_STATUS_ALARM) && linked ? TFT_RED : TFT_WHITE);
-  canvas.printf("ALARM: %s\n", (shown.flags & JOY_STATUS_ALARM) && linked ? "YES" : "no");
-  canvas.setTextColor(TFT_WHITE);
-  canvas.printf("JOG: %s  %s\n", (shown.flags & JOY_STATUS_JOG_ACTIVE) ? "RUN" : "-",
-                (shown.flags & JOY_STATUS_HOMED) && linked ? "HOMED" : "");
-  // Distance from the home origin (valid once HOME has run).
-  canvas.setTextColor(TFT_GREENYELLOW);
-  canvas.printf("X%7.1f Y%7.1f\n", linked ? shown.x_mm : 0.0f, linked ? shown.y_mm : 0.0f);
-  canvas.setTextColor(TFT_WHITE);
-  canvas.setTextColor(speed_level >= JOY_SPEED_VERY_FAST ? TFT_ORANGE : TFT_WHITE);
-  canvas.printf("SPD: %s\n", joySpeedLevelName(speed_level));
-  canvas.setTextColor(TFT_WHITE);
-  canvas.printf("BAT: %.2fV\n", packet.battery_mv / 1000.0f);
-  canvas.printf("L %5d %5d\n", packet.axes[JOY_AXIS_LEFT_X], packet.axes[JOY_AXIS_LEFT_Y]);
-  canvas.printf("R %5d %5d\n", packet.axes[JOY_AXIS_RIGHT_X], packet.axes[JOY_AXIS_RIGHT_Y]);
+  drawStatusChip(shown, linked);
+  drawBattery(packet.battery_mv);
+  drawPosition(shown, linked);
+  drawSpeed(shown, linked);
+  drawStick(18, 95, packet.axes[JOY_AXIS_LEFT_X], packet.axes[JOY_AXIS_LEFT_Y], "XY");
+  drawStick(78, 95, packet.axes[JOY_AXIS_RIGHT_X], packet.axes[JOY_AXIS_RIGHT_Y], "Z/A");
+  drawBottomLine(shown, linked);
   if (center_suspect) {
-    canvas.setTextColor(TFT_RED);
-    canvas.println("CENTER? reboot");
-    canvas.println("sticks released");
+    canvas.fillRoundRect(4, 40, SCREEN_W - 8, 40, 6, TFT_RED);
+    canvas.setFont(&fonts::Font0);
+    canvas.setTextColor(TFT_WHITE);
+    canvas.setTextDatum(middle_center);
+    canvas.drawString("RELEASE STICKS", SCREEN_W / 2, 53);
+    canvas.drawString("AND REBOOT", SCREEN_W / 2, 67);
   }
-  canvas.setTextColor(TFT_LIGHTGREY);
-  canvas.println(linked ? shown.last_result : "");
+  canvas.setTextDatum(top_left);
   canvas.pushSprite(0, 0);
 }
 }  // namespace

@@ -1,3 +1,4 @@
+#include <initializer_list>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -40,8 +41,13 @@ void testMapAxes() {
   require(std::fabs(very_fast.vx_mm_s - 75.0f) < 1e-3f, "very fast +X = 4500 mm/min");
   JogRequest ultra = joyMapAxes(right, JOY_SPEED_ULTRA, config);
   require(std::fabs(ultra.vx_mm_s - 125.0f) < 1e-3f, "ultra +X = 7500 mm/min");
+  JogRequest max_level = joyMapAxes(right, JOY_SPEED_MAX, config);
+  require(std::fabs(max_level.vx_mm_s - 200.0f) < 1e-3f, "max +X = 12000 mm/min");
   JogRequest masked = joyMapAxes(right, 0xFF, config);
-  require(std::fabs(masked.vx_mm_s - 125.0f) < 1e-3f, "speed level uses only the low 2 bits");
+  require(std::fabs(masked.vx_mm_s - 200.0f) < 1e-3f,
+          "out-of-range speed level counts as the top level");
+  require(joySpeedLevel(0x04) == JOY_SPEED_MAX && joySpeedLevel(0x0B) == JOY_SPEED_ULTRA,
+          "speed level uses only the low 3 bits");
 
   const int16_t diagonal[4] = {1000, 1000, 0, 0};
   JogRequest diag = joyMapAxes(diagonal, JOY_SPEED_FAST, config);
@@ -73,6 +79,67 @@ void testMaskTowardLimits() {
   require(vx == 10.0f && vy == 0.0f, "moving away from X limit is allowed; -Y blocked");
 }
 
+void testClampSpeed() {
+  float vx = 30.0f;
+  float vy = 40.0f;
+  jogClampSpeed(vx, vy, 25.0f);
+  require(std::fabs(vx - 15.0f) < 1e-4f && std::fabs(vy - 20.0f) < 1e-4f,
+          "combined speed is clamped keeping direction");
+  vx = 3.0f;
+  vy = 4.0f;
+  jogClampSpeed(vx, vy, 25.0f);
+  require(vx == 3.0f && vy == 4.0f, "slow request unchanged");
+}
+
+void testSoftLimitVelocity() {
+  constexpr float A = 300.0f;
+  constexpr float T = 0.1f;
+  constexpr float M = 0.5f;
+  require(jogSoftLimitVelocity(100.0f, 100.0f, 0.0f, 390.0f, A, T, M) == 100.0f,
+          "far from the boundary the request passes");
+  require(jogSoftLimitVelocity(100.0f, 390.0f, 0.0f, 390.0f, A, T, M) == 0.0f,
+          "outward velocity is 0 at the max boundary");
+  require(jogSoftLimitVelocity(-100.0f, 390.0f, 0.0f, 390.0f, A, T, M) == -100.0f,
+          "inward velocity is allowed at the boundary");
+  require(jogSoftLimitVelocity(-100.0f, 0.0f, 0.0f, 390.0f, A, T, M) == 0.0f,
+          "outward velocity is 0 at the min boundary");
+  require(jogSoftLimitVelocity(100.0f, 395.0f, 0.0f, 390.0f, A, T, M) == 0.0f,
+          "beyond the boundary only inward motion is allowed");
+  require(jogSoftLimitVelocity(100.0f, 389.6f, 0.0f, 390.0f, A, T, M) == 0.0f,
+          "outward velocity is 0 inside the margin");
+  const float limited = jogSoftLimitVelocity(100.0f, 388.0f, 0.0f, 390.0f, A, T, M);
+  require(std::fabs(limited * T + limited * limited / (2.0f * A) - 1.5f) < 1e-3f,
+          "near the boundary v * T + v^2 / 2a = d - margin");
+
+  // Closed loop with the delays seen on the machine: commands every 20 ms
+  // from a position sampled at the command time, applied 40 ms later, and
+  // the axis following with 1/sqrt(2) of the nominal accel (CoreXY worst
+  // case). It must never pass X=390, from slow and from full speed.
+  constexpr float NOMINAL_ACCEL = 600.0f;
+  const float follow_accel = NOMINAL_ACCEL * 0.7071f;
+  for (float requested : {50.0f, 125.0f, 265.0f}) {
+    float x = 250.0f;
+    float v = 0.0f;
+    float pending[2] = {0.0f, 0.0f};  // command pipeline, 20 ms per slot
+    float command = 0.0f;
+    float max_x = x;
+    for (int ms = 0; ms < 6000; ++ms) {
+      if (ms % 20 == 0) {
+        command = pending[0];
+        pending[0] = pending[1];
+        pending[1] = jogSoftLimitVelocity(requested, x, 0.0f, 390.0f, NOMINAL_ACCEL * 0.5f, T, M);
+      }
+      const float dv = command - v;
+      const float step = follow_accel * 0.001f;
+      v += dv > step ? step : (dv < -step ? -step : dv);
+      x += v * 0.001f;
+      if (x > max_x) max_x = x;
+    }
+    require(max_x <= 390.0f, "closed-loop jog never passes the soft limit");
+    require(x > 389.0f, "closed-loop jog gets close to the soft limit");
+  }
+}
+
 void testPacketCrc() {
   JoyCommandPacket packet{};
   packet.seq = 42;
@@ -100,6 +167,8 @@ int main() {
   testShapeAxis();
   testMapAxes();
   testMaskTowardLimits();
+  testClampSpeed();
+  testSoftLimitVelocity();
   testPacketCrc();
   std::cout << "native joystick tests passed\n";
   return 0;

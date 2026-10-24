@@ -66,8 +66,10 @@ class StsServoBus {
                             size_t detail_size);
 
   bool isTracking(uint8_t id) const;
+  // Tracked multi-turn position [counts]; false when tracking is not valid.
+  bool trackedAbsCounts(uint8_t id, int32_t& abs_counts) const;
 
-  // Joystick jog (test mode). beginJog() enables tracking and runs the hold
+  // Jog (joystick / Serial JOG). beginJog() enables tracking and runs the hold
   // check once; updateJog() keeps the goal "lead" ahead of the tracked
   // position (0 holds); endJog() holds at the current position.
   // false from beginJog/updateJog means the servo must not be jogged further

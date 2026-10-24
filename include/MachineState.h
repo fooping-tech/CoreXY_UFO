@@ -21,7 +21,12 @@ struct MachineState {
   bool test_mode_active = false;
   // Atom JoyStick (test input). Written by motionTask only.
   bool joystick_link = false;
+  // Jog session active (joystick or Serial JOG).
   bool joystick_jog_active = false;
+  // Joystick jog started without HOME: XY is slow and has no soft limit.
+  // The UI warns on screen and with the speaker.
+  bool jog_unhomed = false;
+  bool jog_unhomed_moving = false;  // ... and XY is being driven now
   char joystick_last_event[32] = "";
   char homing_state[16] = "Idle";
 };

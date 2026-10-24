@@ -1,0 +1,6 @@
+command,delay_ms,expect,comment
+CONFIG,1000,JOG serial_timeout_ms=,Serial JOG timeout/accel/soft-limit braking settings
+HELP,500,JOG <vx_mm_s>,HELP lists JOG and STOP
+POS,500,TEST_MODE=OFF,JOG/STOP need no TEST_MODE
+STOP,500,STOP complete,STOP while idle: no alarm and HOMED unchanged
+POS,500,ALARM=NO,STOP does not raise an alarm
