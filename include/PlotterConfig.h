@@ -233,6 +233,16 @@ constexpr float JOY_VERY_FAST_FEED_MM_MIN = JOY_FAST_FEED_MM_MIN * 1.5f;  // 450
 constexpr float JOY_ULTRA_FEED_MM_MIN = JOY_FAST_FEED_MM_MIN * 2.5f;      // 7500
 // XYジョグの加減速 [mm/s^2]。減速停止距離 v^2/2a: FAST約2mm、VERY FAST約4.7mm、ULTRA約13mm。
 constexpr float JOY_ACCEL_MM_S2 = 600.0f;
+// HOMEなしのXYジョグの速度上限 [mm/min]。位置が分からずソフトリミットが効かないため遅くする。
+// 2026-10-24 ユーザー指定(HOMEなしでも動かせるが遅く)。速度段階に関係なくこの値で頭打ち。
+constexpr float JOY_UNHOMED_MAX_FEED_MM_MIN = JOY_SLOW_FEED_MM_MIN;  // 600
+// HOMEなしジョグ中のCore2スピーカー警告。開始時に2音、XY移動中は間隔ごとに短いビープ。
+// スピーカーはI2S(GPIO12/0/2)。motion/TMC/サーボ/リミットのピンとは共用しない。
+constexpr bool UI_SOUND_ENABLED = true;
+constexpr uint8_t UI_SOUND_VOLUME = 96;  // 0..255
+constexpr uint16_t UNHOMED_JOG_BEEP_HZ = 2000;
+constexpr uint32_t UNHOMED_JOG_BEEP_MS = 60;
+constexpr uint32_t UNHOMED_JOG_BEEP_INTERVAL_MS = 700;
 // スティックのデッドゾーン(フルスケール比)。XY用と、サーボ(右スティック)用。
 // サーボ側は中央付近のわずかなズレでジョグ開始(200msのhold check)しないよう大きめにする。
 constexpr float JOY_DEADZONE = 0.08f;
@@ -247,6 +257,9 @@ constexpr uint32_t JOY_SESSION_PERIOD_MS = 20;
 constexpr uint32_t JOY_SESSION_IDLE_EXIT_MS = 300;
 // サーボジョグのgoal先行時間 [ms]。速度 x 先行時間だけ先にgoalを置く。
 constexpr uint32_t JOY_SERVO_LEAD_MS = 200;
+static_assert(JOY_UNHOMED_MAX_FEED_MM_MIN > 0.0f &&
+                  JOY_UNHOMED_MAX_FEED_MM_MIN <= JOY_SLOW_FEED_MM_MIN,
+              "un-homed joystick jog must not be faster than SLOW");
 static_assert(JOY_ULTRA_FEED_MM_MIN <= MAX_FEED_MM_MIN,
               "JOY_ULTRA_FEED_MM_MIN must stay within MAX_FEED_MM_MIN");
 static_assert(JOY_SLOW_FEED_MM_MIN > 0.0f && JOY_SLOW_FEED_MM_MIN <= JOY_FAST_FEED_MM_MIN &&

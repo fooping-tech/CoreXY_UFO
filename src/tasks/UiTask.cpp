@@ -94,6 +94,7 @@ const char* pageName(UiPage page) {
 
 uint16_t safetyColor(const MachineState& state) {
   if (state.alarmed) return COLOR_RED;
+  if (state.jog_unhomed) return COLOR_ORANGE;
   if (state.homing_active) return COLOR_YELLOW;
   if (state.motion_active) return COLOR_YELLOW;
   if (state.job_active) return COLOR_BLUE;
@@ -103,6 +104,7 @@ uint16_t safetyColor(const MachineState& state) {
 
 const char* safetyText(const MachineState& state) {
   if (state.alarmed) return "ALARM";
+  if (state.jog_unhomed) return "SLOW JOG";
   if (state.homing_active) return "HOMING";
   if (state.motion_active) return "MOVING";
   if (state.job_active) return "RUNNING";
@@ -218,6 +220,43 @@ void drawNotice() {
   gfx().setTextDatum(middle_center);
   gfx().drawString(ui_notice, rect.x + rect.w / 2, rect.y + rect.h / 2);
   gfx().setTextDatum(top_left);
+}
+
+// Joystick jog without HOME: slow XY and no soft limit. Drawn over the
+// notice area so it cannot be missed.
+void drawUnhomedJogBanner(const MachineState& state) {
+  if (!state.jog_unhomed) return;
+  const Rect rect{8, 184, 304, 26};
+  gfx().fillRoundRect(rect.x, rect.y, rect.w, rect.h, 8, COLOR_ORANGE);
+  gfx().setTextColor(COLOR_BG, COLOR_ORANGE);
+  gfx().setTextDatum(middle_center);
+  gfx().drawString("NO HOME: SLOW XY, NO SOFT LIMIT", rect.x + rect.w / 2,
+                   rect.y + rect.h / 2);
+  gfx().setTextDatum(top_left);
+}
+
+// Speaker warning for the un-homed joystick jog: two rising tones when it
+// starts, then a short beep every UNHOMED_JOG_BEEP_INTERVAL_MS while XY moves.
+void updateUnhomedJogSound(const MachineState& state) {
+  static bool was_unhomed = false;
+  static uint32_t last_beep_ms = 0;
+  static uint32_t second_tone_ms = 0;  // 0: none pending
+  if (!UI_SOUND_ENABLED) return;
+  const uint32_t now_ms = millis();
+  if (second_tone_ms != 0 && static_cast<int32_t>(now_ms - second_tone_ms) >= 0) {
+    second_tone_ms = 0;
+    if (state.jog_unhomed) M5.Speaker.tone(UNHOMED_JOG_BEEP_HZ, 160);
+  }
+  if (state.jog_unhomed && !was_unhomed) {
+    M5.Speaker.tone(1500, 120);
+    second_tone_ms = now_ms + 150;
+    last_beep_ms = now_ms + 150;
+  } else if (state.jog_unhomed_moving && second_tone_ms == 0 &&
+             now_ms - last_beep_ms >= UNHOMED_JOG_BEEP_INTERVAL_MS) {
+    M5.Speaker.tone(UNHOMED_JOG_BEEP_HZ, UNHOMED_JOG_BEEP_MS);
+    last_beep_ms = now_ms;
+  }
+  was_unhomed = state.jog_unhomed;
 }
 
 void drawMetric(const Rect& rect, const char* label, const char* value,
@@ -492,6 +531,7 @@ void drawUi(const StatusMessage& status) {
     }
   }
   drawNotice();
+  drawUnhomedJogBanner(status.machine);
   drawFooter();
   gfx().endWrite();
   if (ui_gfx == &ui_canvas) {
@@ -780,7 +820,7 @@ void uiTask(void*) {
   bool lcd_ready = false;
   if (M5_UI_ENABLED) {
     auto m5_config = M5.config();
-    m5_config.internal_spk = false;
+    m5_config.internal_spk = UI_SOUND_ENABLED;
     m5_config.internal_mic = false;
     M5.begin(m5_config);
     lcd_ready = M5.Display.begin();
@@ -789,6 +829,7 @@ void uiTask(void*) {
     M5.Display.setTextSize(1);
     M5.Display.setTextDatum(top_left);
     M5.BtnB.setHoldThresh(TEST_MODE_HOLD_MS);
+    if (UI_SOUND_ENABLED) M5.Speaker.setVolume(UI_SOUND_VOLUME);
     if (lcd_ready) {
       ui_canvas.setColorDepth(16);
       if (ui_canvas.createSprite(M5.Display.width(), M5.Display.height())) {
@@ -830,6 +871,7 @@ void uiTask(void*) {
       have_status = true;
     }
 
+    if (M5_UI_ENABLED && have_status) updateUnhomedJogSound(status.machine);
     if (lcd_ready && have_status) {
       handleTouch(status);
       const bool changed =

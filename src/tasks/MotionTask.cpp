@@ -1520,6 +1520,13 @@ void runJogSession(const JogRequest& first, JogSource first_source) {
   bool xy_start_logged = false;
   serial_jog_gate.rejected = false;
   machine_state.joystick_jog_active = true;
+  // Joystick jog without HOME: slow XY, no soft limit; the UI warns.
+  machine_state.jog_unhomed = source == JogSource::JOYSTICK && !homed_at_start;
+  machine_state.jog_unhomed_moving = false;
+  if (machine_state.jog_unhomed) {
+    logMessage("JOG unhomed: XY max %.0f mm/min, no soft limit (HOME to lift)",
+               JOY_UNHOMED_MAX_FEED_MM_MIN);
+  }
   setMotionActive(true);
   logMessage("JOG start vx=%.1f vy=%.1f z=%ld arm=%ld src=%s HOMED=%s", first.vx_mm_s,
              first.vy_mm_s, static_cast<long>(first.z_counts_s),
@@ -1587,6 +1594,9 @@ void runJogSession(const JogRequest& first, JogSource first_source) {
     float vx_mm_s = request.vx_mm_s;
     float vy_mm_s = request.vy_mm_s;
     jogClampSpeed(vx_mm_s, vy_mm_s, max_speed_mm_s);
+    if (!homed_at_start) {
+      jogClampSpeed(vx_mm_s, vy_mm_s, JOY_UNHOMED_MAX_FEED_MM_MIN / 60.0f);
+    }
     if (source == JogSource::SERIAL_JOG && !homed_at_start && (vx_mm_s != 0.0f || vy_mm_s != 0.0f)) {
       // Serial XY jog needs HOME; servo axes keep running.
       if (!not_homed_reported) {
@@ -1647,6 +1657,11 @@ void runJogSession(const JogRequest& first, JogSource first_source) {
       moving_toward_y = vy_mm_s * static_cast<float>(HOMING_Y_DIR) > 0.0f;
     } else if (xy_ready) {
       stepper_backend.stopVelocity();
+    }
+    const bool unhomed_moving = machine_state.jog_unhomed && xy_ready && xy_requested;
+    if (unhomed_moving != machine_state.jog_unhomed_moving) {
+      machine_state.jog_unhomed_moving = unhomed_moving;
+      publishStatus();
     }
     updateMachinePositionEstimateFromBackend(reference);
 
@@ -1712,8 +1727,10 @@ void runJogSession(const JogRequest& first, JogSource first_source) {
     serial_jog_gate.rejected = true;
     serial_jog_gate.last_ms = millis();
   }
-  setMotionActive(false);
   machine_state.joystick_jog_active = false;
+  machine_state.jog_unhomed = false;
+  machine_state.jog_unhomed_moving = false;
+  setMotionActive(false);
   setJoystickEvent("JOG end %s", reason);
   logMessage("JOG end reason=%s X=%.3f Y=%.3f HOMED=%s src=%s%s", reason, machine_state.x_mm,
              machine_state.y_mm, machine_state.homed ? "YES" : "NO", jogSourceName(source),

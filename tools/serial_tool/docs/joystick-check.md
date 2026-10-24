@@ -30,7 +30,8 @@ AtomのLCD: Link、TEST、ALARM、JOG、SPD(速度段階、VERY FAST以上は橙
 ## 安全仕様
 
 - TEST_MODE不要。ジョブ中・alarm中・homing中は無視(`JOY_JOG ignored reason=...`)
-- HOMEDで始めたジョグはHOMEDを保ち、X 0..390 / Y 0..200の手前で減速して止まる(`JOG soft_limit axis=..`)。HOMEDでなければ従来どおりHOMED=NOのまま(復旧用)
+- HOMEDで始めたジョグはHOMEDを保ち、X 0..390 / Y 0..200の手前で減速して止まる(`JOG soft_limit axis=..`)
+- HOMEDでなければ動かせるが(復旧用)、XYは600mm/min(SLOW)に制限され、ソフトリミットは効かない。Core2の画面に`SLOW JOG`とオレンジの警告帯、開始時に2音、XY移動中は0.7秒ごとにビープ
 - スティックを離す、リンクが250ms途絶える、STOP/ABORTで減速停止。サーボは現在位置で保持
 - ジョグ中のSerialコマンドではジョグは終わらない。`POS`等の読み取りは即答、移動・設定系は`NACK_<CMD> reason=jog_active`
 - Serialの`JOG`が来るとそちらが優先され、そのセッション中はジョイスティック入力を無視する
@@ -42,15 +43,16 @@ AtomのLCD: Link、TEST、ALARM、JOG、SPD(速度段階、VERY FAST以上は橙
 
 1. Core2の`CONFIG`で`JOY enabled=1 ready=1 core2_mac=... atom_mac=...`、`POS`で`JOY=LINK`
 2. テストモードOFFのまま左スティックを倒す → 動く(`JOG start ... src=JOY`)
-3. `HOME`後にジョグ → 終了後も`HOMED=YES`。X 390 / Y 200へ向けて倒し続けると手前で止まる
-4. 各軸の向きを確認(LCDの値: 右/上で+になるか。逆なら`AtomJoyMain.cpp`の`AXIS_SIGN`)
-5. 左スティック: XYが倒している間動き、離すと止まる(`JOG start` / `JOG end reason=idle`)
-6. XY移動中にXスイッチを手で押す → 即停止(`reason=limit_x`)。押したまま-X → 動かない
-7. 右スティック上下でZ、左右でアームが回り、離すと保持する(回転方向が逆なら`JOY_Z_SIGN`/`JOY_ARM_SIGN`)
-8. ジョグ中にAtomの電源を切る → 250ms以内に停止(`reason=link_lost`)
-9. ジョグ中に右ボタン → 停止、`ALARM`。画面ボタン長押しで解除
-10. ジョグ中にSerialから`POS`を10Hzで送る → ジョグは続き、`POS ... MOTION=YES`が毎回返る
-11. ジョグ中にSerialから`STOP` → 減速停止(`reason=command`)、`STOP complete`、アラームなし
+3. HOMEせずにULTRAでXYを倒す → 遅い(600mm/min)、Core2に`SLOW JOG`と警告帯、開始2音と移動中のビープ
+4. `HOME`後にジョグ → 表示・音なし、終了後も`HOMED=YES`。X 390 / Y 200へ向けて倒し続けると手前で止まる
+5. 各軸の向きを確認(LCDの値: 右/上で+になるか。逆なら`AtomJoyMain.cpp`の`AXIS_SIGN`)
+6. 左スティック: XYが倒している間動き、離すと止まる(`JOG start` / `JOG end reason=idle`)
+7. XY移動中にXスイッチを手で押す → 即停止(`reason=limit_x`)。押したまま-X → 動かない
+8. 右スティック上下でZ、左右でアームが回り、離すと保持する(回転方向が逆なら`JOY_Z_SIGN`/`JOY_ARM_SIGN`)
+9. ジョグ中にAtomの電源を切る → 250ms以内に停止(`reason=link_lost`)
+10. ジョグ中に右ボタン → 停止、`ALARM`。画面ボタン長押しで解除
+11. ジョグ中にSerialから`POS`を10Hzで送る → ジョグは続き、`POS ... MOTION=YES`が毎回返る
+12. ジョグ中にSerialから`STOP` → 減速停止(`reason=command`)、`STOP complete`、アラームなし
 
 ## Serial CSV
 

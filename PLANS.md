@@ -2639,3 +2639,17 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 - `JOG_POS`(20Hz)とPOS(10Hz)を同時に流した時のLogQueue/USB帯域は計算上約35%で未測定。
 - ジョイスティックがTEST_MODEなしで動くため、ゲーム中にAtomを触ると動き出す。Serial JOGセッション中とジョブ中は無視されるが、ゲーム側の待機中は動く。不要なら`JOYSTICK_ENABLED=false`。
 
+## 2026-10-24: HOMEなしのジョイスティックジョグの低速制限と警告(ユーザー要望)
+
+背景: 受け入れテスト後(ABORTでHOMED解除)にジョイスティックで動かすとソフトリミットが効かないと指摘。HOMEDなしのジョグにソフトリミットをかけない仕様どおりだったが、HOMEなしでも動かせる代わりに遅くし、画面と音で知らせることになった。
+
+- [x] HOMEDなしのジョイスティックXYを600mm/minで頭打ち(`JOY_UNHOMED_MAX_FEED_MM_MIN`)
+- [x] `MachineState.jog_unhomed`/`jog_unhomed_moving`、LCDの`SLOW JOG`ピルと警告帯、スピーカーの開始2音と移動中ビープ
+- [x] Core2スピーカーを有効化(`UI_SOUND_ENABLED`)
+- [x] ビルド(m5stack-core2 / sim)、書き込み、SELFTEST PASS
+- [ ] 実機(ジョイスティック): HOMEなしで最高速段階でも遅い、画面表示、音。HOME後は表示も音も出ずソフトリミット手前で止まる
+
+未解決リスク:
+
+- スピーカー(I2S、DMA)有効化がステップ生成・LCD・UARTに与える影響は未測定。問題が出たら`UI_SOUND_ENABLED=false`。
+- 音量96/255の聞こえ方は未確認。

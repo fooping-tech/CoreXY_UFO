@@ -1365,3 +1365,12 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - CONFIGに`JOG serial_timeout_ms= serial_accel= joy_accel= max_speed= soft_limit_brake_ratio= latency_s= margin= jog_pos_ms=`、HELPに`JOG`/`STOP`。
 - motionTaskのスタックを6144→8192(ジョグループ内で読み取り系コマンドを処理するため)。
 
+## 2026-10-24: HOMEなしのジョイスティックジョグの低速制限と警告
+
+- ユーザー指定: HOMEなしでもジョイスティックでXYを動かせるが、遅くする。Core2の画面と音で分かるようにする。
+- HOMEDでない状態で始めたジョイスティックのセッションでは、XYの合成速度を`JOY_UNHOMED_MAX_FEED_MM_MIN`(600mm/min = SLOW)で頭打ちにする。速度段階(FAST/ULTRA等)に関係なく適用。ソフトリミットは効かない(位置が分からないため)。Z/アームは対象外。
+- `MachineState.jog_unhomed`(そのセッション中true)と`jog_unhomed_moving`(XYを駆動中true)をmotionTaskが立て、StatusMessageでuiTaskへ渡す。開始時にログ`JOG unhomed: XY max 600 mm/min, no soft limit (HOME to lift)`。
+- 画面(uiTask、Core 0): 右上の状態ピルをオレンジの`SLOW JOG`、下部にオレンジの帯`NO HOME: SLOW XY, NO SOFT LIMIT`。
+- 音(Core2内蔵スピーカー、uiTask): 開始時に1500Hz→2000Hzの2音、XY駆動中は`UNHOMED_JOG_BEEP_INTERVAL_MS`(700ms)ごとに2000Hz 60msのビープ。`UI_SOUND_ENABLED`、`UI_SOUND_VOLUME`(96/255)で設定。
+- スピーカー: M5Unifiedの`internal_spk`を`UI_SOUND_ENABLED`に連動して有効化(従来は無効)。Core2のスピーカーはI2S(BCLK GPIO12、LRCK GPIO0、DATA GPIO2)で、motion/TMC/サーボ/リミットのピンとは共用しない。GPIO0/2はboot strapだが起動後のI2S出力でありmotion出力ではない。
+- Serial `JOG`はHOMED必須のため対象外(HOMEDなしのSerialセッションはXYを無視する)。
