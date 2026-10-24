@@ -43,14 +43,15 @@ void joyMaskTowardLimits(float& vx_mm_s, float& vy_mm_s, bool x_limit_active,
 void jogClampSpeed(float& vx_mm_s, float& vy_mm_s, float max_speed_mm_s);
 
 // Soft-limit braking for one axis of a homed jog. Returns the requested
-// velocity limited so the axis can stop before [min_mm, max_mm]:
-// |v_out| <= min(sqrt(2 * brake_accel * d_eff), d_eff / lookahead_s), d_eff = distance to the boundary
-// in the direction of travel minus |previous_mm_s| * lookahead_s. Within
-// stop_tolerance_mm of the boundary the outward velocity is 0; inward
-// velocity is never limited.
-float jogSoftLimitVelocity(float requested_mm_s, float previous_mm_s, float position_mm,
-                           float min_mm, float max_mm, float brake_accel_mm_s2,
-                           float lookahead_s, float stop_tolerance_mm);
+// velocity limited so the axis can stop before [min_mm, max_mm]: |v| obeys
+// v * latency_s + v^2 / (2 * brake_accel) <= d (d = distance to the boundary
+// in the direction of travel minus stop_margin_mm), i.e. it may keep v for
+// latency_s and then stop at brake_accel. Following this curve never needs
+// more than brake_accel. The margin absorbs the delayed final approach. Inside
+// the margin the outward velocity is 0; inward velocity is never limited.
+float jogSoftLimitVelocity(float requested_mm_s, float position_mm, float min_mm,
+                           float max_mm, float brake_accel_mm_s2, float latency_s,
+                           float stop_margin_mm);
 
 inline bool jogRequestIsZero(const JogRequest& request) {
   return request.vx_mm_s == 0.0f && request.vy_mm_s == 0.0f &&

@@ -1455,12 +1455,15 @@ void logJogPos(float vx_mm_s, float vy_mm_s) {
 }
 
 struct JogPosReporter {
-  uint32_t last_ms = 0;
+  uint32_t due_ms = 0;      // next line; advanced by the interval so the
+                            // 20 ms session loop still averages 20 Hz
+  uint32_t sample_ms = 0;   // time of the last line, for VX/VY
   float last_x_mm = 0.0f;
   float last_y_mm = 0.0f;
 
   void reset() {
-    last_ms = millis();
+    sample_ms = millis();
+    due_ms = sample_ms + JOG_POS_INTERVAL_MS;
     last_x_mm = machine_state.x_mm;
     last_y_mm = machine_state.y_mm;
   }
@@ -1468,11 +1471,13 @@ struct JogPosReporter {
   void poll(bool force) {
     if (JOG_POS_INTERVAL_MS == 0) return;
     const uint32_t now_ms = millis();
-    const uint32_t elapsed_ms = now_ms - last_ms;
-    if (!force && elapsed_ms < JOG_POS_INTERVAL_MS) return;
+    if (!force && static_cast<int32_t>(now_ms - due_ms) < 0) return;
+    due_ms += JOG_POS_INTERVAL_MS;
+    if (static_cast<int32_t>(now_ms - due_ms) >= 0) due_ms = now_ms + JOG_POS_INTERVAL_MS;
+    const uint32_t elapsed_ms = now_ms - sample_ms;
     const float dt_s = elapsed_ms > 0 ? static_cast<float>(elapsed_ms) / 1000.0f : 1.0f;
     logJogPos((machine_state.x_mm - last_x_mm) / dt_s, (machine_state.y_mm - last_y_mm) / dt_s);
-    last_ms = now_ms;
+    sample_ms = now_ms;
     last_x_mm = machine_state.x_mm;
     last_y_mm = machine_state.y_mm;
   }
@@ -1496,8 +1501,6 @@ void runJogSession(const JogRequest& first, JogSource first_source) {
   bool y_was_active = safety_manager.yLimitActive() || safety_manager.yLimitRawActive();
   bool soft_limit_x_logged = false;
   bool soft_limit_y_logged = false;
-  float commanded_vx_mm_s = 0.0f;
-  float commanded_vy_mm_s = 0.0f;
   const char* reason = "idle";
   // Ended by STOP / a limit / an alarm: a still held Serial JOG key must be
   // released (JOG 0 0 or a pause) before it can start a new session.
@@ -1597,11 +1600,11 @@ void runJogSession(const JogRequest& first, JogSource first_source) {
     if (homed_at_start) {
       const float brake_mm_s2 = accel_mm_s2 * JOG_SOFT_LIMIT_BRAKE_RATIO;
       const float limited_vx_mm_s = jogSoftLimitVelocity(
-          vx_mm_s, commanded_vx_mm_s, machine_state.x_mm, X_MIN_MM, X_MAX_MM, brake_mm_s2,
-          JOG_SOFT_LIMIT_LOOKAHEAD_S, JOG_SOFT_LIMIT_STOP_TOLERANCE_MM);
+          vx_mm_s, machine_state.x_mm, X_MIN_MM, X_MAX_MM, brake_mm_s2,
+          JOG_SOFT_LIMIT_LATENCY_S, JOG_SOFT_LIMIT_STOP_MARGIN_MM);
       const float limited_vy_mm_s = jogSoftLimitVelocity(
-          vy_mm_s, commanded_vy_mm_s, machine_state.y_mm, Y_MIN_MM, Y_MAX_MM, brake_mm_s2,
-          JOG_SOFT_LIMIT_LOOKAHEAD_S, JOG_SOFT_LIMIT_STOP_TOLERANCE_MM);
+          vy_mm_s, machine_state.y_mm, Y_MIN_MM, Y_MAX_MM, brake_mm_s2,
+          JOG_SOFT_LIMIT_LATENCY_S, JOG_SOFT_LIMIT_STOP_MARGIN_MM);
       const bool x_blocked = vx_mm_s != 0.0f && limited_vx_mm_s == 0.0f;
       const bool y_blocked = vy_mm_s != 0.0f && limited_vy_mm_s == 0.0f;
       if (x_blocked && !soft_limit_x_logged) {
@@ -1645,8 +1648,6 @@ void runJogSession(const JogRequest& first, JogSource first_source) {
     } else if (xy_ready) {
       stepper_backend.stopVelocity();
     }
-    commanded_vx_mm_s = xy_ready ? vx_mm_s : 0.0f;
-    commanded_vy_mm_s = xy_ready ? vy_mm_s : 0.0f;
     updateMachinePositionEstimateFromBackend(reference);
 
     // Servos. beginJog() holds for the 200 ms hold check, during which limits

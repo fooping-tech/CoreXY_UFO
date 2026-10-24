@@ -1,3 +1,4 @@
+#include <initializer_list>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -87,40 +88,51 @@ void testClampSpeed() {
 
 void testSoftLimitVelocity() {
   constexpr float A = 300.0f;
-  require(jogSoftLimitVelocity(100.0f, 0.0f, 100.0f, 0.0f, 390.0f, A, 0.04f, 0.05f) == 100.0f,
+  constexpr float T = 0.1f;
+  constexpr float M = 0.5f;
+  require(jogSoftLimitVelocity(100.0f, 100.0f, 0.0f, 390.0f, A, T, M) == 100.0f,
           "far from the boundary the request passes");
-  require(jogSoftLimitVelocity(100.0f, 0.0f, 390.0f, 0.0f, 390.0f, A, 0.04f, 0.05f) == 0.0f,
+  require(jogSoftLimitVelocity(100.0f, 390.0f, 0.0f, 390.0f, A, T, M) == 0.0f,
           "outward velocity is 0 at the max boundary");
-  require(jogSoftLimitVelocity(-100.0f, 0.0f, 390.0f, 0.0f, 390.0f, A, 0.04f, 0.05f) == -100.0f,
+  require(jogSoftLimitVelocity(-100.0f, 390.0f, 0.0f, 390.0f, A, T, M) == -100.0f,
           "inward velocity is allowed at the boundary");
-  require(jogSoftLimitVelocity(-100.0f, 0.0f, 0.0f, 0.0f, 390.0f, A, 0.04f, 0.05f) == 0.0f,
+  require(jogSoftLimitVelocity(-100.0f, 0.0f, 0.0f, 390.0f, A, T, M) == 0.0f,
           "outward velocity is 0 at the min boundary");
-  require(jogSoftLimitVelocity(100.0f, 0.0f, 395.0f, 0.0f, 390.0f, A, 0.04f, 0.05f) == 0.0f,
+  require(jogSoftLimitVelocity(100.0f, 395.0f, 0.0f, 390.0f, A, T, M) == 0.0f,
           "beyond the boundary only inward motion is allowed");
-  const float limited = jogSoftLimitVelocity(100.0f, 0.0f, 389.0f, 0.0f, 390.0f, A, 0.04f, 0.05f);
-  require(std::fabs(limited - std::sqrt(2.0f * A * 1.0f)) < 1e-3f, "near the boundary v <= sqrt(2ad)");
+  require(jogSoftLimitVelocity(100.0f, 389.6f, 0.0f, 390.0f, A, T, M) == 0.0f,
+          "outward velocity is 0 inside the margin");
+  const float limited = jogSoftLimitVelocity(100.0f, 388.0f, 0.0f, 390.0f, A, T, M);
+  require(std::fabs(limited * T + limited * limited / (2.0f * A) - 1.5f) < 1e-3f,
+          "near the boundary v * T + v^2 / 2a = d - margin");
 
-  // Closed loop: commands every 20 ms, the axis follows with only 1/sqrt(2)
-  // of the nominal accel (CoreXY worst case). It must never pass X=390.
+  // Closed loop with the delays seen on the machine: commands every 20 ms
+  // from a position sampled at the command time, applied 40 ms later, and
+  // the axis following with 1/sqrt(2) of the nominal accel (CoreXY worst
+  // case). It must never pass X=390, from slow and from full speed.
   constexpr float NOMINAL_ACCEL = 600.0f;
   const float follow_accel = NOMINAL_ACCEL * 0.7071f;
-  float x = 300.0f;
-  float v = 0.0f;
-  float command = 0.0f;
-  float max_x = x;
-  for (int ms = 0; ms < 5000; ++ms) {
-    if (ms % 20 == 0) {
-      command = jogSoftLimitVelocity(125.0f, command, x, 0.0f, 390.0f, NOMINAL_ACCEL * 0.5f,
-                                     0.04f, 0.05f);
+  for (float requested : {50.0f, 125.0f, 265.0f}) {
+    float x = 250.0f;
+    float v = 0.0f;
+    float pending[2] = {0.0f, 0.0f};  // command pipeline, 20 ms per slot
+    float command = 0.0f;
+    float max_x = x;
+    for (int ms = 0; ms < 6000; ++ms) {
+      if (ms % 20 == 0) {
+        command = pending[0];
+        pending[0] = pending[1];
+        pending[1] = jogSoftLimitVelocity(requested, x, 0.0f, 390.0f, NOMINAL_ACCEL * 0.5f, T, M);
+      }
+      const float dv = command - v;
+      const float step = follow_accel * 0.001f;
+      v += dv > step ? step : (dv < -step ? -step : dv);
+      x += v * 0.001f;
+      if (x > max_x) max_x = x;
     }
-    const float dv = command - v;
-    const float step = follow_accel * 0.001f;
-    v += dv > step ? step : (dv < -step ? -step : dv);
-    x += v * 0.001f;
-    if (x > max_x) max_x = x;
+    require(max_x <= 390.0f, "closed-loop jog never passes the soft limit");
+    require(x > 389.0f, "closed-loop jog gets close to the soft limit");
   }
-  require(max_x <= 390.0f, "closed-loop jog never passes the soft limit");
-  require(x > 389.0f, "closed-loop jog gets close to the soft limit");
 }
 
 void testPacketCrc() {

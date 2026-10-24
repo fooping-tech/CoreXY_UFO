@@ -50,7 +50,7 @@ python tools/serial_tool/jog_check.py --port /dev/cu.usbserial-XXXX --tests 1,2,
 | 1 | `JOG 50 0`を2秒 → `JOG 0 0` → X約+100mm、`reason=zero HOMED=YES` |
 | 2 | `JOG -50 0`を1秒、送信停止 → 最後のJOGから600ms以内に`reason=timeout` |
 | 5 / 5b | ジョグ中の`XY 100 100` → `NACK_XY ... reason=jog_active`、後から実行されない。ジョグ中の`POS`が`MOTION=YES`で即答 |
-| 3 | X=380から`JOG 100 0`を1.5秒 → `JOG_POS`のXが390以下 |
+| 3 | X=380から`JOG 100 0`を1.5秒 → `JOG_POS`のXが389〜390 |
 | 6 | `XY 20 y 3000`の途中で`STOP` → `NACK_XY reason=stopped`、`STOP complete HOMED=YES`、`ALARM=NO`、続く`XY`が通る |
 | 7 | 20HzのJOGを10秒+`POS` 2Hz → `JOG_POS`約200行、POS全応答、その後の`ACK_XY`を受信 |
 | 11 | `JOG 0 0 400 0`を1秒 → TEST_MODE OFFでZサーボが回る(hold check通過) |

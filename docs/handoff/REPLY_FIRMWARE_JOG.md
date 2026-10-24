@@ -14,7 +14,7 @@
 | §3.1 `JOG` | 実装済み |
 | §3.2 `STOP` | 実装済み |
 | §3.3 `JOG_POS` | 実装済み（ジョグ中のみ。`REPORT ON` は未実装） |
-| §4 受け入れ条件 | ビルド・書き込み・native テスト完了。実機では SELFTEST と #8（`NACK_JOG reason=not_homed`）を確認。#1〜7、#11 はモータ電源（VM）が入っておらず HOME できなかったため未確認。確認スクリプト `tools/serial_tool/jog_check.py` を用意した |
+| §4 受け入れ条件 | 実機で #1〜8、#11 を確認済み（`tools/serial_tool/jog_check.py` 14/14 PASS、§6）。#9、#10（ジョイスティック）は未確認 |
 | 前回 HANDOFF_FIRMWARE.md §4.1〜§4.4 | 今回は未着手 |
 
 ## 2. 応答行（`firmware_protocol.md` §2 の書式）
@@ -25,7 +25,7 @@
 | `JOG ...`（継続中） | **何も返さない**（`ACK QUEUED` も返さない） |
 | ジョグ中の位置（50 ms ごと） | `JOG_POS X=123.456 Y=100.000 VX=50.0 VY=0.0 Z_ABS=4731 ARM_ABS=NA` |
 | ジョグ終了 | `JOG end reason=zero X=200.123 Y=100.000 HOMED=YES src=SERIAL` |
-| ソフトリミットに到達（継続） | `JOG soft_limit axis=X X=389.962` |
+| ソフトリミットに到達（継続） | `JOG soft_limit axis=X X=389.525` |
 | `JOG` の拒否 | `NACK_JOG reason=not_homed` / `alarm` / `homing` / `job_active` / `busy` / `bad_args (...)` |
 | ジョグ中の移動・設定系コマンド | `ACK QUEUED XY` → `NACK_XY target=(100.000,100.000) reason=jog_active`、その他は `ACK QUEUED HOME` → `NACK_HOME reason=jog_active` |
 | ジョグ中の `POS` | `ACK QUEUED POS` → `POS X=.. Y=.. ... HOMED=YES ... MOTION=YES ...`（ジョグは続く） |
@@ -46,7 +46,7 @@
 2. **`busy`**: `XY` の実行中に `JOG` を送ると `NACK_JOG reason=busy`（ジョブ中は `job_active`、`HOME` 中は `homing`）。
 3. **シリアルの XY ジョグは HOMED が必要。** Z/アームだけの `JOG 0 0 <z> <arm>` は HOMED なしでも動く。HOMED でないセッション中に XY を送ると `NACK_JOG reason=not_homed (XY ignored in this session)` を 1 回出し、XY だけ無視する。
 4. **速度上限**: 合成速度を `MAX_FEED_MM_MIN/60` で切る。加減速は `SERIAL_JOG_ACCEL_MM_S2` = 600 mm/s²。50 mm/s からの停止距離は約 2 mm。
-5. **ソフトリミット**: HOMED で始めたジョグは X 0..390 / Y 0..200 の約 0.04 mm 手前で止まる（最悪減速度モデルでの native テスト）。境界に近づくと速度が落ちる。内向きにはすぐ動ける。
+5. **ソフトリミット**: HOMED で始めたジョグは X 0..390 / Y 0..200 の約 0.4〜0.5 mm 手前で止まる（実機で X=389.575）。境界に近づくと速度が落ちる。内向きにはすぐ動ける。
 6. **`STOP`**:
    - `XY` は減速して止まる。backend のキューに入っている分（数十〜百 ms 程度）を実行してから減速を始めるので、即時ではない。停止位置はステップ数から求めるので正確。そのまま次の `XY` を送ってよい。
    - `STOP` より前に送った移動系コマンドは捨てる（`NACK_... reason=stopped`）。**`STOP complete` を受けてから**次の移動を送ること。`STOP` とほぼ同時に送った移動も捨てられることがある。
@@ -97,6 +97,19 @@ elif name == "STOP":
 
 ## 6. 実機確認の予定
 
-2026-10-24: SELFTEST PASS、待機中の `STOP` で `STOP complete`（アラームなし）、#8 PASS。
+2026-10-24 実機結果（SELFTEST PASS、`jog_check.py` 14/14 PASS）:
+
+| # | 結果 |
+|---|---|
+| 1 | X +101.3 mm、`JOG end reason=zero X=201.350 Y=100.000 HOMED=YES src=SERIAL` |
+| 2 | 最後の `JOG` から 349 ms で `reason=timeout`（250 ms + 減速） |
+| 3 | X 最大 389.575（390 以下） |
+| 4 | `reason=abort`、`ALARM=YES`、`HOMED=NO` |
+| 5 / 5b | `NACK_XY ... reason=jog_active`、ジョグ後に実行されない。ジョグ中の `POS` は `MOTION=YES HOMED=YES` で即答 |
+| 6 | `NACK_XY ... reason=stopped`、`STOP complete X=336.713 Y=100.000 HOMED=YES`、アラームなし、続く `XY` が通る |
+| 7 | 10 秒間で `JOG_POS` 202 行（20.1 Hz）、`POS` 38/38 応答、その後の `ACK_XY` を受信 |
+| 8 | `NACK_JOG reason=not_homed` |
+| 11 | TEST_MODE OFF で Z サーボがジョグ（hold check 通過） |
+
 
 `python tools/serial_tool/jog_check.py --port <port> --echo` で §4 の 1〜8、11 を自動確認する（HOME を含み実機が動く）。9、10（ジョイスティック）は手動。結果はこのファイルと `PLANS.md` に追記する。

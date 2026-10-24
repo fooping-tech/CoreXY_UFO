@@ -50,10 +50,11 @@ void Diagnostics::printConfig() {
              JUNCTION_DEVIATION_MM, CLASSIC_JERK_LIMIT_MM_S,
              LOOKAHEAD_BATCH_COLLECT_MS,
              static_cast<unsigned>(PlannerQueue::CAPACITY));
-  logMessage("JOG serial_timeout_ms=%lu serial_accel=%.1f joy_accel=%.1f max_speed=%.1fmm/s soft_limit_brake_ratio=%.2f lookahead_s=%.3f jog_pos_ms=%lu",
+  logMessage("JOG serial_timeout_ms=%lu serial_accel=%.1f joy_accel=%.1f max_speed=%.1fmm/s soft_limit_brake_ratio=%.2f latency_s=%.3f margin=%.2fmm jog_pos_ms=%lu",
              static_cast<unsigned long>(SERIAL_JOG_TIMEOUT_MS), SERIAL_JOG_ACCEL_MM_S2,
              JOY_ACCEL_MM_S2, MAX_FEED_MM_MIN / 60.0f, JOG_SOFT_LIMIT_BRAKE_RATIO,
-             JOG_SOFT_LIMIT_LOOKAHEAD_S, static_cast<unsigned long>(JOG_POS_INTERVAL_MS));
+             JOG_SOFT_LIMIT_LATENCY_S, JOG_SOFT_LIMIT_STOP_MARGIN_MM,
+             static_cast<unsigned long>(JOG_POS_INTERVAL_MS));
   logMessage("JOB state=%s result=%s last_error=%s",
              job_controller.stateName(), job_controller.result(),
              job_controller.lastError());

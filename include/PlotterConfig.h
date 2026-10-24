@@ -264,13 +264,15 @@ constexpr uint32_t SERIAL_JOG_TIMEOUT_MS = JOY_LINK_TIMEOUT_MS;
 constexpr float SERIAL_JOG_ACCEL_MM_S2 = 600.0f;
 // ジョグ中のJOG_POS出力周期 [ms](20Hz)。0で出力しない。
 constexpr uint32_t JOG_POS_INTERVAL_MS = 50;
-// HOMED中のソフトリミット減速。外向き速度を sqrt(2 * a * ratio * d) 以下に抑える。
+// HOMED中のソフトリミット減速。外向き速度vを v*T + v^2/(2*a*ratio) <= d に抑える
+// (d=境界までの距離、T=JOG_SOFT_LIMIT_LATENCY_S)。この曲線に沿う減速度はa*ratio以下。
 // CoreXYは各モータが独立に加減速するため、軸の減速度は最悪で公称の1/sqrt(2)になる。
-// 0.5はそれより小さく取った安全率。lookaheadは指令更新周期+遅れの見込み [s]。
+// 0.5はそれより小さく取った安全率。Tは指令更新周期20ms+位置推定とFastAccelStepperの遅れ。
+// 2026-10-24: 前回指令速度xT を距離から引く方式は実機で0.21mm越えた(カーブが急すぎ)ため変更。
 constexpr float JOG_SOFT_LIMIT_BRAKE_RATIO = 0.5f;
-constexpr float JOG_SOFT_LIMIT_LOOKAHEAD_S = 0.040f;
-// 境界までの残りがこの距離以下なら外向き速度を0にする [mm]。
-constexpr float JOG_SOFT_LIMIT_STOP_TOLERANCE_MM = 0.05f;
+constexpr float JOG_SOFT_LIMIT_LATENCY_S = 0.100f;
+// 境界の手前に取る余裕 [mm]。遅れのある最後の接近で越えないため。停止位置は境界の約0.3〜0.5mm手前。
+constexpr float JOG_SOFT_LIMIT_STOP_MARGIN_MM = 0.5f;
 static_assert(SERIAL_JOG_ACCEL_MM_S2 > 0.0f && SERIAL_JOG_ACCEL_MM_S2 <= MAX_ACCEL_MM_S2,
               "SERIAL_JOG_ACCEL_MM_S2 must be in (0, MAX_ACCEL_MM_S2]");
 static_assert(JOG_SOFT_LIMIT_BRAKE_RATIO > 0.0f && JOG_SOFT_LIMIT_BRAKE_RATIO < 0.7071f,

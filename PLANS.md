@@ -2618,7 +2618,8 @@ Z軸構想: 紐とドラム、ストローク800mm、荷重400g。STS3020(7.4V�
 - [x] 書き込み(m5stack-core2、/dev/cu.usbserial-5B1F0093251)
 - [x] 実機: SELFTEST PASS、`jog_check.csv` 全行OK(CONFIGのJOG行、HELP、待機中STOPで`STOP complete`・ALARM=NO)
 - [x] 実機: 受け入れ条件8(HOMEDなしの`JOG 50 0` → `NACK_JOG reason=not_homed`)PASS
-- [ ] 実機: 受け入れ条件1〜7、11(`jog_check.py`)。2026-10-24はTMC2209がUART無応答(connection=2、VM未投入とみられる)でHOMEが`reason=tmc_not_ready`となり未実行
+- [x] 実機(VM投入後、`jog_check.py` 14/14 PASS): #1 dX=101.3mm `reason=zero HOMED=YES`、#2 最後のJOGから349msで`reason=timeout`、#5 `NACK_XY reason=jog_active`・後から実行されない、#5b POS即答`MOTION=YES`、#3 X最大389.575(390以下)、#6 STOPで`NACK_XY reason=stopped`→`STOP complete X=336.713 HOMED=YES`・続くXY OK、#7 JOG_POS 20.1Hz・POS 38/38・その後ACK_XY、#11 TEST_MODE OFFでZサーボジョグ、#4 ABORTで`reason=abort`・ALARM・HOMED=NO
+- [x] 1回目の実機で見つかった問題の修正: ソフトリミットで0.21mm越え(減速カーブが急すぎ)→`v*T+v^2/2a<=d-margin`へ変更。JOG_POSが16.5Hz(20msループで60ms間隔)→締め切り方式
 - [ ] 実機確認: ジョイスティック(受け入れ条件9、10)
 - [ ] CoreXY_UFO_Game側の`FakeFirmware`/`protocol.py`更新(ゲーム側リポジトリ)
 
@@ -2633,7 +2634,7 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 未解決リスク:
 
 - STOPはbackend(FastAccelStepper)のキューに入っている分を実行してから減速を始めるため、停止距離はキュー深さ分長くなる(高速時に要実測)。
-- JOGのソフトリミット減速は最悪減速度モデルで検証したが、実機の停止位置(390/200の手前の余裕)は未測定。
+- JOGのソフトリミット減速の実機確認はX+方向・100mm/sのみ。Y方向、0側、125mm/s以上、斜め移動は未確認。
 - ジョグ中のTMC_STATUSはUART読出しでジョグループが数ms止まる。デッドマン250msには十分小さいが未測定。
 - `JOG_POS`(20Hz)とPOS(10Hz)を同時に流した時のLogQueue/USB帯域は計算上約35%で未測定。
 - ジョイスティックがTEST_MODEなしで動くため、ゲーム中にAtomを触ると動き出す。Serial JOGセッション中とジョブ中は無視されるが、ゲーム側の待機中は動く。不要なら`JOYSTICK_ENABLED=false`。

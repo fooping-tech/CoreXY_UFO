@@ -202,7 +202,8 @@ def test_soft_limit(fw: Firmware, c: Checker) -> None:
     xs = [field_value(line.text, "X") for line in fw.log.since(t0) if line.text.startswith("JOG_POS")]
     xs = [x for x in xs if x is not None]
     max_x = max(xs) if xs else 0.0
-    c.check("3 soft limit X<=390", bool(xs) and max_x <= X_MAX_MM, f"max X={max_x:.3f}")
+    c.check("3 soft limit X<=390", bool(xs) and max_x <= X_MAX_MM and max_x >= X_MAX_MM - 1.0,
+            f"max X={max_x:.3f}")
 
 
 def test_stop_xy(fw: Firmware, c: Checker) -> None:
@@ -222,20 +223,26 @@ def test_stop_xy(fw: Firmware, c: Checker) -> None:
 
 def test_log_flood(fw: Firmware, c: Checker) -> None:
     t0 = time.monotonic()
+    pos_sent = 0
 
     def extra(index: int) -> None:
+        nonlocal pos_sent
         if index % 5 == 0:
             fw.send("POS")
+            pos_sent += 1
 
     fw.jog("JOG 10 10", 5.0, extra)
     fw.jog("JOG -10 -10", 5.0, extra)
     fw.send("JOG 0 0")
-    jog_end(fw, t0)
+    end = jog_end(fw, t0)
     lines = fw.log.since(t0)
-    jog_pos = sum(line.text.startswith("JOG_POS") for line in lines)
+    jog_pos = [line.t for line in lines if line.text.startswith("JOG_POS")]
     pos = sum(line.text.startswith("POS X=") for line in lines)
-    c.check("7 JOG_POS ~20 Hz", jog_pos >= 180, f"JOG_POS={jog_pos} (expect ~200)")
-    c.check("7 every POS answered", pos >= 40, f"POS={pos}/40")
+    rate_hz = (len(jog_pos) - 1) / (jog_pos[-1] - jog_pos[0]) if len(jog_pos) > 1 else 0.0
+    c.check("7 JOG_POS ~20 Hz", 18.0 <= rate_hz <= 22.0,
+            f"JOG_POS={len(jog_pos)} rate={rate_hz:.1f}Hz")
+    c.check("7 every POS answered", pos == pos_sent, f"POS={pos}/{pos_sent}")
+    c.check("7 session not interrupted", end is not None and "reason=zero" in end.text)
     t1 = fw.send("XY 60 60 3000")
     c.check("7 ACK_XY after 10 s jog", fw.wait_for(r"^ACK_XY target=\(60", t1, 10.0) is not None)
 

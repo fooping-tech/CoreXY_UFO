@@ -50,18 +50,17 @@ void jogClampSpeed(float& vx_mm_s, float& vy_mm_s, float max_speed_mm_s) {
   }
 }
 
-float jogSoftLimitVelocity(float requested_mm_s, float previous_mm_s, float position_mm,
-                           float min_mm, float max_mm, float brake_accel_mm_s2,
-                           float lookahead_s, float stop_tolerance_mm) {
+float jogSoftLimitVelocity(float requested_mm_s, float position_mm, float min_mm,
+                           float max_mm, float brake_accel_mm_s2, float latency_s,
+                           float stop_margin_mm) {
   if (requested_mm_s == 0.0f) return 0.0f;
   const float distance_mm =
-      requested_mm_s > 0.0f ? max_mm - position_mm : position_mm - min_mm;
-  const float effective_mm = distance_mm - fabsf(previous_mm_s) * lookahead_s;
-  if (distance_mm <= stop_tolerance_mm || effective_mm <= 0.0f) return 0.0f;
-  // The second bound keeps the last slow approach from crossing the boundary
-  // before the next update.
-  const float max_speed_mm_s = fminf(sqrtf(2.0f * brake_accel_mm_s2 * effective_mm),
-                                     lookahead_s > 0.0f ? effective_mm / lookahead_s : 1e9f);
+      (requested_mm_s > 0.0f ? max_mm - position_mm : position_mm - min_mm) - stop_margin_mm;
+  if (distance_mm <= 0.0f) return 0.0f;
+  // Positive root of v^2 / (2a) + v * T - d = 0.
+  const float a = brake_accel_mm_s2;
+  const float t = latency_s;
+  const float max_speed_mm_s = a * (sqrtf(t * t + 2.0f * distance_mm / a) - t);
   if (fabsf(requested_mm_s) <= max_speed_mm_s) return requested_mm_s;
   return requested_mm_s > 0.0f ? max_speed_mm_s : -max_speed_mm_s;
 }
