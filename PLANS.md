@@ -2656,14 +2656,15 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 
 ## 2026-10-24: Atom JoyStick 速度MAX、左ボタンでHOME、LCD刷新(プロトコルv4、ユーザー要望)
 
-- [x] 速度5段階目MAX 12000mm/min(プロトコルv4、3bit速度フィールド、範囲外は最上段)。nativeテスト追加
+- [x] 速度5段階目MAX(プロトコルv4、3bit速度フィールド、範囲外は最上段)。nativeテスト追加。12000→ユーザー要望で上限15909mm/min(265mm/s)へ
 - [x] 左ボタン1秒長押し=HOME(TEST_MODE切替を廃止)、状態にHOMING/UNHOMED_JOGフラグ
 - [x] Atom LCD刷新(状態チップ、電池、X/Y、速度バー、スティック表示、長押し進行バー)
 - [x] ビルド(m5stack-core2 / atoms3-joystick)、Core2書き込み、SELFTEST PASS、CONFIGに`feed=.../12000`
-- [ ] Atom書き込み(USBでMacから見えず未実施。v4同士でないとリンクしない)
+- [x] Atom書き込み(Core2のUSBケーブルで認識、`/dev/cu.usbmodem111401`)。Core2とリンク(`atom_mac=48:CA:43:39:ED:C4`)
+- [x] 実機ログ: HOMEなしジョイスティックでXYが10.0mm/s(600mm/min)で頭打ち、斜めも合成10mm/s、TEST_MODEなしでZサーボジョグ
 - [ ] 実機: MAXでの脱調・停止距離、左ボタン長押しでHOME、LCDの見え方
 
 未解決リスク:
 
-- MAX 12000mm/minは実機で確認した高速範囲(5000mm/min)を大きく超える。脱調したら`JOY_MAX_FEED_MM_MIN`を下げる。
+- MAX 15909mm/minは実機で確認した高速範囲(5000mm/min)を大きく超える。脱調したら`JOY_MAX_FEED_MM_MIN`を下げる。これ以上速くするには`MAX_MOTOR_SPEED_STEPS_S`(30000)を上げる必要があり、XY/G-codeの上限も変わる。
 - Atomから機械が動くHOMEを起動できるようになった。1秒長押しが必要で、ジョブ中・alarm中はCore2側で拒否される。

@@ -231,9 +231,10 @@ constexpr float JOY_SLOW_FEED_MM_MIN = 600.0f;
 constexpr float JOY_FAST_FEED_MM_MIN = 3000.0f;
 constexpr float JOY_VERY_FAST_FEED_MM_MIN = JOY_FAST_FEED_MM_MIN * 1.5f;  // 4500
 constexpr float JOY_ULTRA_FEED_MM_MIN = JOY_FAST_FEED_MM_MIN * 2.5f;      // 7500
-// 2026-10-24: ULTRAより上のMAXを追加(ユーザー要望)。FASTx4。上限MAX_FEED_MM_MIN(約15909)以内。
-// 減速停止距離 v^2/2a = 約33mm(加速度600mm/s^2)。脱調は未確認。
-constexpr float JOY_MAX_FEED_MM_MIN = JOY_FAST_FEED_MM_MIN * 4.0f;        // 12000
+// 2026-10-24: ULTRAより上のMAXを追加(ユーザー要望)。最初FASTx4(12000)、さらに速くとの要望で
+// ファーム全体の上限MAX_FEED_MM_MIN(約15909 = 265mm/s、モータ30000 steps/s)に合わせた。
+// 減速停止距離 v^2/2a = 約58mm(加速度600mm/s^2)。脱調は未確認。
+constexpr float JOY_MAX_FEED_MM_MIN = MAX_FEED_MM_MIN;                    // ~15909
 // XYジョグの加減速 [mm/s^2]。減速停止距離 v^2/2a: FAST約2mm、VERY FAST約4.7mm、ULTRA約13mm。
 constexpr float JOY_ACCEL_MM_S2 = 600.0f;
 // HOMEなしのXYジョグの速度上限 [mm/min]。位置が分からずソフトリミットが効かないため遅くする。
