@@ -1379,7 +1379,13 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 
 - ユーザー要望: ULTRAより速い速度、Atomのテストモード切替は不要、AtomからHOME、AtomのLCDを見やすく。
 - プロトコルv4(`JOY_PROTOCOL_VERSION`=4)。版違いのパケットは破棄するため、Core2とAtomの両方に書き込むこと。
-  - 速度段階はflags bit0-2(`JOY_FLAG_SPEED_MASK`=0x07)、5段階: SLOW 600 / FAST 3000 / VERY FAST 4500 / ULTRA 7500 / MAX 約15909 mm/min(`JOY_MAX_FEED_MM_MIN`=`MAX_FEED_MM_MIN`、265mm/s。当初12000から「もっと速く」の要望でファーム全体の上限に合わせた)。範囲外の値は最上段として扱う(`joySpeedLevel()`)。MAXの減速停止距離は約58mm(600mm/s^2)。HOMEDならソフトリミット減速が効く。HOMEDでなければ600mm/minで頭打ち。
+  - 速度段階はflags bit0-2(`JOY_FLAG_SPEED_MASK`=0x07)、5段階: SLOW 600 / FAST 3000 / VERY FAST 4500 / ULTRA 7500 / MAX 12000 mm/min(`JOY_MAX_FEED_MM_MIN`)。範囲外の値は最上段として扱う(`joySpeedLevel()`)。MAXの減速停止距離は約33mm(600mm/s^2)。経緯: 12000→ファーム上限15909へ上げたところ実機で脱調、ユーザー確認で12000までは問題なしのため12000に戻した。HOMEDならソフトリミット減速が効く。HOMEDでなければ600mm/minで頭打ち。
   - `JoyCommandPacket.test_mode_toggle_count`を`home_count`へ。左ボタン1秒長押しでCore2が`HOME`をCommandQueueへ入れる(ログ`JOY button: HOME`)。AtomからのTEST_MODE切替は廃止(Core2のLCD BtnB長押しとSerialの`TEST_MODE`は残る)。ジョグ中は`NACK_HOME reason=jog_active`(スティックを離して300ms後に押す)。
   - 状態パケットのflagsに`JOY_STATUS_HOMING`(0x20)、`JOY_STATUS_UNHOMED_JOG`(0x40)を追加。
 - Atom LCD(128x128、100ms更新): 上部に状態チップ(NO LINK灰/ALARM赤/HOMING黄/SLOW JOG橙/JOG水色/NEED HOME青/READY緑)と電池残量(3.4〜4.1V)、中央にX/Y(HOMED前は灰色)、速度名と5段バー(HOMEDでなければ`NO HOME:SLOW`)、左右スティックの位置表示、下段に長押しの進行バー(`HOME...`/`ALARM CLEAR...`)・直前のイベント・操作ヒント`L:HOME  R:STOP`。スティックを倒したまま起動した場合は`RELEASE STICKS AND REBOOT`。
+
+## 2026-10-25: ジョグのモータSTEP周波数上限と脱調チェック用ログ
+
+- ジョグ(ジョイスティック/Serial `JOG`共通)は、XY速度に加えて各モータのSTEP周波数を`JOG_MAX_MOTOR_STEPS_S`(=JOY_MAX_FEED 12000mm/minのX単独時 = 16000 steps/s)以下に抑える。CoreXYは斜め45度で片側モータが√2倍速くなるため、方向を保ったまま全体を縮める(斜めは合成約8485mm/min、各軸100mm/s)。ソフトリミット減速の後に適用する。
+- 実機: 純X 15909mm/min(21200 steps/s)で脱調、12000mm/min(16000 steps/s)で問題なし。
+- HOMEの`HOME_X|HOME_Y set zero ...`行の末尾に`before_zero=`を追加。スイッチが反応した時点の論理位置(前回HOMEからステップ数で追跡、ZEROでリセット)で、脱調がなければ約0(±0.05mm程度)、ずれは失った距離。先頭トークンは不変。

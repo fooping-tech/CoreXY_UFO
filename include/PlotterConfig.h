@@ -231,10 +231,13 @@ constexpr float JOY_SLOW_FEED_MM_MIN = 600.0f;
 constexpr float JOY_FAST_FEED_MM_MIN = 3000.0f;
 constexpr float JOY_VERY_FAST_FEED_MM_MIN = JOY_FAST_FEED_MM_MIN * 1.5f;  // 4500
 constexpr float JOY_ULTRA_FEED_MM_MIN = JOY_FAST_FEED_MM_MIN * 2.5f;      // 7500
-// 2026-10-24: ULTRAより上のMAXを追加(ユーザー要望)。最初FASTx4(12000)、さらに速くとの要望で
-// ファーム全体の上限MAX_FEED_MM_MIN(約15909 = 265mm/s、モータ30000 steps/s)に合わせた。
-// 減速停止距離 v^2/2a = 約58mm(加速度600mm/s^2)。脱調は未確認。
-constexpr float JOY_MAX_FEED_MM_MIN = MAX_FEED_MM_MIN;                    // ~15909
+// 2026-10-24: ULTRAより上のMAXを追加(ユーザー要望)。15909(ファーム上限)では実機で脱調、
+// 12000までは問題なし(ユーザー確認)のため12000。減速停止距離 v^2/2a = 約33mm(600mm/s^2)。
+constexpr float JOY_MAX_FEED_MM_MIN = 12000.0f;
+// ジョグのモータSTEP周波数上限 [steps/s]。X/Y単独でJOY_MAX_FEEDのときの値(16000)。
+// CoreXYは斜め45度で片側モータが√2倍速くなるため、斜めジョグはこの上限で約8485mm/minに抑える。
+// 実機: 純X 15909mm/min(21200 steps/s)で脱調、12000(16000 steps/s)で問題なし。
+constexpr float JOG_MAX_MOTOR_STEPS_S = JOY_MAX_FEED_MM_MIN / 60.0f * STEPS_PER_MM;
 // XYジョグの加減速 [mm/s^2]。減速停止距離 v^2/2a: FAST約2mm、VERY FAST約4.7mm、ULTRA約13mm。
 constexpr float JOY_ACCEL_MM_S2 = 600.0f;
 // HOMEなしのXYジョグの速度上限 [mm/min]。位置が分からずソフトリミットが効かないため遅くする。

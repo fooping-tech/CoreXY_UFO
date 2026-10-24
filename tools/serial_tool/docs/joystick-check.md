@@ -23,7 +23,7 @@ Atomは**スティックを離した状態で電源ON**(中央値の校正)。LC
 | 右ボタン | 非常停止(ABORT。ALARMになりHOMED解除) |
 | 左ボタン 1秒長押し | HOME(長押し中は画面下に進行バー) |
 | 画面ボタン 1秒長押し | ALARM_CLEAR |
-| 左スティック押し込み | 速度切替 SLOW(600)→FAST(3000)→VERY FAST(4500)→ULTRA(7500)→MAX(約15909 mm/min、ファーム上限)→SLOW。起動時はFAST |
+| 左スティック押し込み | 速度切替 SLOW(600)→FAST(3000)→VERY FAST(4500)→ULTRA(7500)→MAX(12000 mm/min、斜めは約8485)→SLOW。起動時はFAST |
 
 AtomのLCD: 上部に状態(NO LINK/ALARM/HOMING/SLOW JOG/JOG/NEED HOME/READY)と電池、中央にX/Y(HOME前は灰色)、速度名と5段バー、左右スティックの位置、下段に長押しの進行バー・直前のイベント・操作ヒント。
 プロトコルv4: Core2とAtomの両方を同じ版で書き込むこと(版違いはリンクしない)。

@@ -327,14 +327,19 @@ bool HomingController::homeAxis(Axis axis, StepperBackendFastAccel& backend,
         break;
 
       case State::SetXZero:
-      case State::SetYZero:
+      case State::SetYZero: {
+        // Logical position where the switch triggered, counted in steps
+        // since the last HOME (ZERO resets it). ~0 when no steps were lost;
+        // otherwise the offset is the lost distance (step loss check).
+        const float before_zero_mm = axis == Axis::X ? machine.x_mm : machine.y_mm;
         setCompletePosition(axis, machine);
-        logMessage("HOME_%s set zero X=%.3f Y=%.3f A=%ld B=%ld limitRaw=%s limitDebounced=%s",
+        logMessage("HOME_%s set zero X=%.3f Y=%.3f A=%ld B=%ld limitRaw=%s limitDebounced=%s before_zero=%.3f",
                    axisName(axis), machine.x_mm, machine.y_mm,
                    machine.a_steps, machine.b_steps,
                    targetLimitRawActive(axis, safety) ? "ON" : "OFF",
-                   targetLimitActive(axis, safety) ? "ON" : "OFF");
+                   targetLimitActive(axis, safety) ? "ON" : "OFF", before_zero_mm);
         return true;
+      }
 
       case State::Idle:
       case State::Complete:

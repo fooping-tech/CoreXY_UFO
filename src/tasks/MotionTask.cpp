@@ -1641,6 +1641,18 @@ void runJogSession(const JogRequest& first, JogSource first_source) {
         xy_ready = true;
       }
     }
+    if (xy_requested) {
+      // Keep both motors within JOG_MAX_MOTOR_STEPS_S, keeping the direction:
+      // on a diagonal one CoreXY motor turns sqrt(2) times faster.
+      const CoreXYDelta rate =
+          CoreXYKinematics::xyDeltaToABSteps(vx_mm_s, vy_mm_s, STEPS_PER_MM);
+      const float fastest = fmaxf(fabsf(static_cast<float>(rate.a_steps)),
+                                  fabsf(static_cast<float>(rate.b_steps)));
+      if (fastest > JOG_MAX_MOTOR_STEPS_S) {
+        vx_mm_s *= JOG_MAX_MOTOR_STEPS_S / fastest;
+        vy_mm_s *= JOG_MAX_MOTOR_STEPS_S / fastest;
+      }
+    }
     if (xy_ready && xy_requested) {
       // xyDeltaToABSteps of a 1 s delta = A/B step rates.
       const CoreXYDelta rate =
