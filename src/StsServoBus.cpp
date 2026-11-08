@@ -630,7 +630,21 @@ void StsServoBus::endJog(uint8_t id) {
   int raw_counts = 0;
   if (readRawPosition(id, raw_counts)) updateTracking(state, raw_counts);
   // Hold where it is instead of dropping torque (a loaded Z drum would fall).
-  servo.WritePosEx(id, static_cast<int16_t>(state.abs_counts), STS_TEST_SPEED_COUNTS_PER_S,
+  const int32_t hold_counts = state.abs_counts;
+  servo.WritePosEx(id, static_cast<int16_t>(hold_counts), STS_TEST_SPEED_COUNTS_PER_S,
                    STS_TEST_ACC);
+  // The servo decelerates past the hold point and comes back (about 80 counts
+  // at 800 counts/s, measured). Keep tracking until it settles, or the next
+  // beginJog()/moveRelative() sees the overshoot as idle drift.
+  const uint32_t started_ms = millis();
+  while (millis() - started_ms < STS_JOG_SETTLE_TIMEOUT_MS) {
+    delay(STS_TEST_POLL_INTERVAL_MS);
+    if (!readRawPosition(id, raw_counts)) continue;
+    updateTracking(state, raw_counts);
+    if (labs(state.abs_counts - hold_counts) <= STS_TEST_TOLERANCE_COUNTS &&
+        servo.ReadMove(id) == 0) {
+      break;
+    }
+  }
 #endif
 }

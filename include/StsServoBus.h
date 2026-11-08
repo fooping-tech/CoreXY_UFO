@@ -84,7 +84,8 @@ class StsServoBus {
 
   // Jog (joystick / Serial JOG). beginJog() enables tracking and runs the hold
   // check once; updateJog() keeps the goal "lead" ahead of the tracked
-  // position (0 holds); endJog() holds at the current position.
+  // position (0 holds); endJog() holds at the current position and tracks the
+  // servo until it settles (up to STS_JOG_SETTLE_TIMEOUT_MS).
   // false from beginJog/updateJog means the servo must not be jogged further
   // in this session; detail has the reason. tracking tells the caller whether
   // the absolute position continues (KEPT) or was set anew (NEW/RESET).

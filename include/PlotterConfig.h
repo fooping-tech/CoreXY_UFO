@@ -195,6 +195,9 @@ constexpr uint32_t STS_TEST_MAX_READ_GAP_MS = 250;
 // hold check: hold + torque ON後この時間で+/-許容を超えて動けば即torque OFF。
 constexpr uint32_t STS_TEST_HOLD_CHECK_MS = 200;
 constexpr int STS_TEST_HOLD_CHECK_TOLERANCE_COUNTS = 10;
+// ジョグ終了時、hold指令後にサーボが止まるまで追跡を続ける上限。減速で保持点を越えて戻る
+// (800 counts/sで約80 counts、2026-11-08実測)ため。2400 counts/sからの減速は約0.48s。
+constexpr uint32_t STS_JOG_SETTLE_TIMEOUT_MS = 600;
 // runaway guard: 逆方向またはdelta超過がこの量を超えたら即torque OFF。
 constexpr int STS_TEST_RUNAWAY_MARGIN_COUNTS = 50;
 static_assert(static_cast<uint32_t>(STS_TEST_SPEED_COUNTS_PER_S) * STS_TEST_MAX_READ_GAP_MS / 1000 <

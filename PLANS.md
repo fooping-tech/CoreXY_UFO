@@ -2685,10 +2685,12 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 - [x] `SERVO_TURN`/`SERVO_ANGLE`は変更なし(1回拒否→次で再設定)。`SERVO_ANGLE`は`moveRelative`経由で確認済み(依頼3.3)
 - [x] ビルド(m5stack-core2 / sim / hwtest)、nativeテスト
 - [x] チェック: `servo_power_cycle_check.py`、`examples/servo_power_cycle_check.csv`、`docs/servo-power-cycle-check.md`
-- [ ] 書き込み・SELFTEST
-- [ ] 実機: Z(ID 1)を数回転下げる → サーボだけ電源断 → `SERVO_STATUS 1`が`tracking=LOST` → JOGで`tracking=RESET`、1回転の端で止まらない
-- [ ] 実機: 爪(ID 2)で同じ。ジョイスティックのZ/アームでも同じ
-- [ ] 実機: `SERVO_TURN`の1回拒否→再試行PASS(`--servo-turn`)
+- [x] 書き込み・SELFTEST PASS
+- [x] 実機で発見・修正: JOG終了直後(約0.5秒以内)に次のJOGを始めると`idle_drift drift=-79`で追跡無効。hold後の減速の行き過ぎ(約80 counts)を追跡していなかった → `endJog()`で停止まで追跡(`STS_JOG_SETTLE_TIMEOUT_MS` 600ms)
+- [x] 実機 Z(ID 1) `--id 1 --servo-turn` 9/9 PASS: 電源断後`tracking=LOST limits=0/4095` → JOG `tracking=RESET` → 再JOG `tracking=KEPT`、raw 189→3318(0をまたいで-966 counts)。`SERVO_TURN`は1回目`REJECTED multi_turn_lost`、2回目PASS
+- [x] 実機 爪(ID 2) `--id 2 --rate 400` 7/7 PASS: raw 3666→87→595(4095をまたぐ)、`RESET`→`KEPT`
+- [x] サーボ電源はID 1/2共通(ユーザー確認)。電源断で両方が同時に多回転を失う
+- [ ] ジョイスティックのZ/アームで、電源断後の最初の押下で動く(目視)
 
 未解決リスク:
 

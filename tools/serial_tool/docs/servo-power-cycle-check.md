@@ -18,11 +18,20 @@ STS3020 だけ電源を入れ直したあと(Core2 は動いたまま)の、`SER
 | `JOG servo id=N begin_ms=.. (hold check; XY waits) tracking=RESET` | 多回転が失われていたので設定し直した。`abs` は今の1回転内の位置から振り直し |
 | `JOG servo id=N disabled reason=.. multi_turn_lost=YES` | 設定し直しに失敗した(例: `goal_mismatch`)。このセッションではそのサーボを動かさない |
 
+JOG の終了時は、サーボが保持点で止まるまで(最大 600 ms)追跡を続ける。終了直後に次の JOG を始めても `idle_drift` にならない。
+
+## 実機結果(2026-11-08)
+
+- `--id 1 --servo-turn`: 9/9 PASS。raw 189→3318(0 をまたいで -966 counts)
+- `--id 2 --rate 400`: 7/7 PASS。raw 3666→87→595(4095 をまたぐ)
+
 `SERVO_TURN`/`SERVO_ANGLE` は従来どおり、1回目を `result=REJECTED reason=multi_turn_lost (retry)` で拒否し、2回目で多回転に戻して動かす。
 
 ## 自動チェック(サーボが動く)
 
 サーボの電源だけを切れるようにしておく(サーボ用電源のスイッチやコネクタ)。XY は動かない。
+現在の機体は ID 1/2 の電源が共通なので、入れ直すと両方が `tracking=LOST` になる(対象でない方はそのまま)。
+スクリプトはポートを開くと Core2 がリセットされるため、1回の実行の中で電源を入れ直す(実行の合間ではない)。
 Z ドラムに荷重がある場合は、`--rate` の向き(符号)と大きさを確かめてから実行する。
 
 ```bash

@@ -59,6 +59,7 @@ def prompt(message: str) -> None:
 def run(fw: Firmware, c: Checker, servo_id: int, rate: int, duration_s: float,
         servo_turn: bool) -> None:
     expected = abs(rate) * duration_s
+    signed_expected = rate * duration_s
     print(f"--- servo id={servo_id}: establish tracking")
     begin, _ = jog_servo(fw, servo_id, rate, duration_s)
     c.check("1 first JOG starts", "begin_ms=" in begin, begin)
@@ -87,7 +88,7 @@ def run(fw: Firmware, c: Checker, servo_id: int, rate: int, duration_s: float,
         moved = abs_counts(after) - abs_counts(before)
     c.check("6 second JOG keeps tracking (tracking=KEPT)", "tracking=KEPT" in begin, begin)
     c.check("7 servo really moved", moved is not None and abs(moved) >= expected * 0.5 and
-            (moved > 0) == (rate > 0), f"moved={moved} expected~{expected:+.0f}")
+            (moved > 0) == (rate > 0), f"moved={moved} expected~{signed_expected:+.0f}")
 
     if not servo_turn:
         return

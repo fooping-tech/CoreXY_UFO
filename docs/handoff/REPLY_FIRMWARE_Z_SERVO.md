@@ -16,7 +16,8 @@
 | §3.2 状態報告の矛盾をなくす | 実装済み: `SERVO_STATUS` が `tracking=LOST` を出す（状態は変えない） |
 | §3.3 爪（ID 2）の JOG | §3.1 で一緒に直った（同じ `beginJog()`） |
 | §3.3 `moveToAngle()`（`SERVO_ANGLE`） | 変更不要。`moveRelative()` を通るので、動かす前に同じ確認で `multi_turn_lost (retry)` になる |
-| §5 受け入れ確認（実機） | **未実施**（§6）。ビルドとネイティブテストのみ通過 |
+| §5 受け入れ確認（実機） | 1〜5 を確認済み（§6）。ジョイスティックの目視は未確認 |
+| （実機確認中に発見）JOG 終了直後に次の JOG を始めると止まる | 修正済み（§3） |
 
 依頼にない危険も1つ直しました。今の `beginJog()` は、制限が戻っていても保持確認（`holdAndVerify`）で古い `abs` を位置の指令として書きます。1回転モードのサーボは 0〜4095 の外の指令を端の値に丸めるので、`abs` がその範囲の外にあると**端まで回り**、保持確認がずれを検出して**トルクを切ります**。荷重のある Z ドラムは落ちる可能性があります。今回の変更で、制限の確認は保持確認より前に行われます。
 
@@ -42,6 +43,8 @@
 - **`tracking=NEW`**: 起動後の初回など、追跡していなかったサーボで追跡を始めた。ESP32 だけ再起動した場合は、サーボの多回転の位置から `abs` を引き継ぎます（従来どおり）。
 - JOG が多回転を設定し直すのは、**JOG の開始時（`beginJog()`）だけ**です。ジョグ中にサーボの電源が切れた場合は、従来どおり位置が読めなくなって `JOG servo id=N stopped reason=feedback_lost tracking=INVALID` になります。
 - 設定し直しには、「電源投入直後の状態か」の判定（goal=0 かつ torque=0、または goal≈raw）を使います。電源を切っている間にドラムを手で回した場合や、旧ファームウェアで JOG を試したあとでも、通常は通ります。失敗した場合は `disabled ... multi_turn_lost=YES` になり、そのセッションではサーボを動かしません。
+- **JOG 終了直後の押し直し（今回の実機確認で見つけて修正）**: これまでは、JOG を止めてから約 0.5 秒以内に次の JOG や `SERVO_TURN` を始めると、`JOG servo id=N disabled reason=idle_drift drift=-79 tracking=INVALID` で止まっていました。サーボは減速で保持点を約 80 カウント行き過ぎて戻ります。その戻りを、待機中に勝手に動いたものと判定していたためです。今は JOG の終了時に、サーボが止まるまで（最大 600 ms）位置を追います。**`JOG end` の行はその後に出る**ので、JOG を止めてから `JOG end` までが最大 0.6 秒ほど長くなります。
+- Z（ID 1）と爪（ID 2）のサーボは電源が共通です。電源断では両方が同時に `LOST` になり、それぞれ最初の JOG で `RESET` になります。
 - `SERVO_TURN` は変えていません。ゲーム側の `z_servo_recover`（`SERVO_TURN 1 0.01` で1回拒否させる）もそのまま動きますが、今後は不要です。
 
 ## 4. 判断への回答
@@ -99,10 +102,14 @@ for sid, rate in ((1, z), (2, arm)):
 
 ## 6. 実機確認
 
-- [x] ビルド（`m5stack-core2` / `-sim` / `-hwtest`）、ネイティブテスト
-- [ ] 書き込み・`SELFTEST`
-- [ ] `tools/serial_tool/servo_power_cycle_check.py --id 1`: Z を下げる → サーボだけ電源断 → `tracking=LOST` → JOG で `tracking=RESET` → もう一度 JOG で `tracking=KEPT` かつ `abs` が JOG の分だけ変わる
-- [ ] 同 `--id 2`（爪）、`--servo-turn`（`SERVO_TURN` の1回拒否 → 再試行で PASS）
-- [ ] ジョイスティックの Z/アームでも、入れ直し後の最初の押下で動く
+2026-11-08 実施（シリアル `JOG`）。
 
-結果はこのファイルと `PLANS.md` に追記します。
+- [x] ビルド（`m5stack-core2` / `-sim` / `-hwtest`）、ネイティブテスト
+- [x] 書き込み・`SELFTEST` PASS
+- [x] Z（ID 1）`servo_power_cycle_check.py --id 1 --servo-turn` 9/9 PASS
+  - 電源断の直後: `SERVO_STATUS id=1 ... torque=0 raw=1139 goal=0 limits=0/4095 tracking=LOST abs=1137`
+  - JOG ▼: `JOG servo id=1 begin_ms=217 (hold check; XY waits) tracking=RESET` → `limits=0/0 tracking=YES abs=188`
+  - もう一度 JOG ▼: `tracking=KEPT`、raw 189 → 3318（1回転の境目 0 をまたいで -966 カウント。端で止まらない）
+  - `SERVO_TURN 1 -0.05`: 1回目は `REJECTED reason=multi_turn_lost (retry)`、2回目は `PASS`
+- [x] 爪（ID 2）`--id 2 --rate 400` 7/7 PASS（raw 3666 → 87 → 595、境目 4095 をまたぐ。`RESET` → `KEPT`）
+- [ ] ジョイスティックの Z/アームでも、入れ直し後の最初の押下で動くこと（同じ `beginJog()` を通る。目視は未確認）
