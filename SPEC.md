@@ -63,7 +63,7 @@ Motor driver: TMC2209 x2, STEP/DIR + UART shared bus
 | ペン制御 | Servo PWM |
 | X/Yリミット | GPIO入力 |
 | 状態LED | 外付けNEOPIXEL。灯数は設定可能 |
-| 開発環境 | PlatformIO + Arduino framework |
+| 開発環境 | PlatformIO + Arduino framework。`platform = espressif32@6.12.0`(Arduino core 2.0.17)に固定。core 3.x はESP-NOWコールバック型の変更でビルド不可 |
 | ステッパライブラリ | FastAccelStepper |
 
 ---
