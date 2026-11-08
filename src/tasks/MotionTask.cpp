@@ -1232,7 +1232,8 @@ void handleServoStatus(uint8_t id) {
              "temp=%d moving=%d",
              id, status.error_flags, status.mode, status.torque, status.raw_counts,
              status.goal_counts, status.min_limit_counts, status.max_limit_counts,
-             status.tracking ? "YES" : "NO", static_cast<long>(status.abs_counts),
+             status.tracking_lost ? "LOST" : (status.tracking ? "YES" : "NO"),
+             static_cast<long>(status.abs_counts),
              static_cast<float>(status.abs_counts) / STS_COUNTS_PER_TURN,
              status.voltage_dv * 0.1f, status.temperature_c, status.moving);
 }
@@ -1686,14 +1687,16 @@ void runJogSession(const JogRequest& first, JogSource first_source) {
       if (!servo_begun[i]) {
         if (servo_rates[i] == 0 || stepper_backend.isRunning()) continue;
         const uint32_t begin_started_ms = millis();
-        if (!sts_servo_bus.beginJog(SERVO_IDS[i], detail, sizeof(detail))) {
+        StsJogTracking tracking = StsJogTracking::KEPT;
+        if (!sts_servo_bus.beginJog(SERVO_IDS[i], tracking, detail, sizeof(detail))) {
           servo_failed[i] = true;
           logMessage("JOG servo id=%u disabled %s", SERVO_IDS[i], detail);
           continue;
         }
         servo_begun[i] = true;
-        logMessage("JOG servo id=%u begin_ms=%lu (hold check; XY waits)", SERVO_IDS[i],
-                   static_cast<unsigned long>(millis() - begin_started_ms));
+        logMessage("JOG servo id=%u begin_ms=%lu (hold check; XY waits) tracking=%s",
+                   SERVO_IDS[i], static_cast<unsigned long>(millis() - begin_started_ms),
+                   stsJogTrackingName(tracking));
       }
       if (!sts_servo_bus.updateJog(SERVO_IDS[i], servo_rates[i], detail, sizeof(detail))) {
         servo_failed[i] = true;
@@ -1731,8 +1734,12 @@ void runJogSession(const JogRequest& first, JogSource first_source) {
   }
   updateMachinePositionEstimateFromBackend(reference);
   stepper_backend.configureDefaultSpeed();
+  // Hold every servo first, then wait for each to settle.
   for (int i = 0; i < 2; ++i) {
     if (servo_begun[i]) sts_servo_bus.endJog(SERVO_IDS[i]);
+  }
+  for (int i = 0; i < 2; ++i) {
+    if (servo_begun[i]) sts_servo_bus.waitJogSettled(SERVO_IDS[i]);
   }
   pos_reporter.poll(true);
   if (require_release) {

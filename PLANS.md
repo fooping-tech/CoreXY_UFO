@@ -2688,3 +2688,24 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 
 - Arduino core 3.xへ移行する場合は、ESP-NOWコールバックの型変更などに対応してからこの固定を外す。
 - mainのブランチ保護は未設定。いまはClaude Codeのhookでのみ防いでいる。
+
+## 2026-11-08: サーボだけ電源が切れたあとのJOG(Issue #11、CoreXY_UFO_Game HANDOFF_FIRMWARE_Z_SERVO)
+
+- [x] `beginJog()`: 保持確認の前に角度制限を確認。戻っていれば多回転に再設定して続け、`tracking=RESET`(依頼3.1 (a))
+- [x] `JOG servo id=N begin_ms=..`の末尾に`tracking=KEPT|NEW|RESET`
+- [x] `SERVO_STATUS`: 追跡中かつ制限≠0/0で`tracking=LOST`(依頼3.2)
+- [x] `SERVO_TURN`/`SERVO_ANGLE`は変更なし(1回拒否→次で再設定)。`SERVO_ANGLE`は`moveRelative`経由で確認済み(依頼3.3)
+- [x] ビルド(m5stack-core2 / sim / hwtest)、nativeテスト
+- [x] チェック: `servo_power_cycle_check.py`、`examples/servo_power_cycle_check.csv`、`docs/servo-power-cycle-check.md`
+- [x] 書き込み・SELFTEST PASS
+- [x] 実機で発見・修正: JOG終了直後(約0.5秒以内)に次のJOGを始めると`idle_drift drift=-79`で追跡無効。hold後の減速の行き過ぎ(約80 counts)を追跡していなかった → `endJog()`で停止まで追跡(`STS_JOG_SETTLE_TIMEOUT_MS` 600ms)
+- [x] 実機 Z(ID 1) `--id 1 --servo-turn` 9/9 PASS: 電源断後`tracking=LOST limits=0/4095` → JOG `tracking=RESET` → 再JOG `tracking=KEPT`、raw 189→3318(0をまたいで-966 counts)。`SERVO_TURN`は1回目`REJECTED multi_turn_lost`、2回目PASS
+- [x] 実機 爪(ID 2) `--id 2 --rate 400` 7/7 PASS: raw 3666→87→595(4095をまたぐ)、`RESET`→`KEPT`
+- [x] サーボ電源はID 1/2共通(ユーザー確認)。電源断で両方が同時に多回転を失う
+- [x] Codexレビュー(P2)対応: Z/爪同時ジョグで`endJog(1)`の待ち中に爪が先読みgoalへ進み続ける → `endJog()`(hold)と`waitJogSettled()`(待ち)に分け、全サーボをholdしてから待つ。待ちの上限はhold時刻から数える。実機: Z -600 / 爪 +300 counts/sの同時ジョグを連続3回、すべて`tracking=KEPT`、停止後は両方moving=0・保持点±2 counts、`JOG 0 0`→`JOG end` 約0.4s、SELFTEST PASS
+- [ ] ジョイスティックのZ/アームで、電源断後の最初の押下で動く(目視)
+
+未解決リスク:
+
+- 再設定は`enableTracking()`の電源投入状態の判定(goal=0かつtorque=0、またはgoal≈raw)に頼る。電源断後に手でドラムを1回転以上回した場合は区別できない(従来どおり)。
+- ジョグ中の電源断から短時間で復帰した場合(読出し欠落が`STS_TEST_MAX_READ_GAP_MS`未満)は、端で止まっても検知しない。

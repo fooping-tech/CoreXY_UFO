@@ -29,8 +29,21 @@ struct StsServoStatus {
   int temperature_c = -1;
   int moving = -1;
   bool tracking = false;
+  // tracking is set but the angle limits are no longer 0/0 (servo power cycled
+  // on its own). abs_counts is stale; reported as tracking=LOST.
+  bool tracking_lost = false;
   int32_t abs_counts = 0;
 };
+
+// How beginJog() found multi-turn tracking.
+enum class StsJogTracking {
+  KEPT,   // already tracking; abs_counts continues
+  NEW,    // was not tracking; enabled now (abs_counts from the servo)
+  RESET,  // was tracking, but the servo lost multi-turn (power cycle);
+          // re-enabled with abs_counts from the current raw position
+};
+
+const char* stsJogTrackingName(StsJogTracking tracking);
 
 enum class StsMoveResult {
   PASS,
@@ -72,11 +85,16 @@ class StsServoBus {
   // Jog (joystick / Serial JOG). beginJog() enables tracking and runs the hold
   // check once; updateJog() keeps the goal "lead" ahead of the tracked
   // position (0 holds); endJog() holds at the current position.
+  // waitJogSettled() then tracks the servo until it settles (up to
+  // STS_JOG_SETTLE_TIMEOUT_MS from the hold). Call endJog() for every jogged
+  // servo first, so none keeps running toward its lead goal during the wait.
   // false from beginJog/updateJog means the servo must not be jogged further
-  // in this session; detail has the reason.
-  bool beginJog(uint8_t id, char* detail, size_t detail_size);
+  // in this session; detail has the reason. tracking tells the caller whether
+  // the absolute position continues (KEPT) or was set anew (NEW/RESET).
+  bool beginJog(uint8_t id, StsJogTracking& tracking, char* detail, size_t detail_size);
   bool updateJog(uint8_t id, int32_t counts_s, char* detail, size_t detail_size);
   void endJog(uint8_t id);
+  void waitJogSettled(uint8_t id);
 
  private:
   struct Track {
@@ -87,6 +105,10 @@ class StsServoBus {
     bool jogging = false;
     int32_t jog_goal_counts = 0;
     uint32_t jog_last_good_read_ms = 0;
+    // Set by endJog(), consumed by waitJogSettled().
+    bool jog_settle_pending = false;
+    int32_t jog_hold_counts = 0;
+    uint32_t jog_hold_ms = 0;
   };
 
   bool validId(uint8_t id) const;

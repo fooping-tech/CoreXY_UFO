@@ -1,0 +1,3 @@
+command,delay_ms,expect,comment
+SERVO_STATUS 1,500,SERVO_STATUS id=1 result=OK,Z drum: tracking=YES (multi-turn) / NO (not yet) / LOST (servo power cycled; limits back to 0/4095)
+SERVO_STATUS 2,500,SERVO_STATUS id=2 result=OK,Arm: same tracking states as id=1
