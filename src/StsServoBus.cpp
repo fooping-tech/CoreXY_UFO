@@ -4,6 +4,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "Core2PinMap.h"
 #include "PlotterConfig.h"
 
@@ -38,6 +39,12 @@ bool readByteOk(uint8_t id, uint8_t address, int& value) {
   return servo.getLastError() == 0 && value >= 0;
 }
 
+// Angle limits 0/0 = multi-turn. A servo power cycle restores 0/4095.
+bool readAngleLimits(uint8_t id, int& min_limit, int& max_limit) {
+  return readWordOk(id, SMS_STS_MIN_ANGLE_LIMIT_L, min_limit) &&
+         readWordOk(id, SMS_STS_MAX_ANGLE_LIMIT_L, max_limit);
+}
+
 // Goal is a sign-magnitude multi-turn value.
 bool readGoalCounts(uint8_t id, int32_t& goal_counts) {
   int raw = 0;
@@ -46,6 +53,15 @@ bool readGoalCounts(uint8_t id, int32_t& goal_counts) {
   return true;
 }
 }  // namespace
+
+const char* stsJogTrackingName(StsJogTracking tracking) {
+  switch (tracking) {
+    case StsJogTracking::KEPT: return "KEPT";
+    case StsJogTracking::NEW: return "NEW";
+    case StsJogTracking::RESET: return "RESET";
+  }
+  return "UNKNOWN";
+}
 
 const char* stsMoveResultName(StsMoveResult result) {
   switch (result) {
@@ -137,8 +153,12 @@ bool StsServoBus::readStatus(uint8_t id, StsServoStatus& status) {
   readRawPosition(id, status.raw_counts);
   int32_t goal_counts = 0;
   if (readGoalCounts(id, goal_counts)) status.goal_counts = goal_counts;
-  readWordOk(id, SMS_STS_MIN_ANGLE_LIMIT_L, status.min_limit_counts);
-  readWordOk(id, SMS_STS_MAX_ANGLE_LIMIT_L, status.max_limit_counts);
+  if (readAngleLimits(id, status.min_limit_counts, status.max_limit_counts)) {
+    // Tracked as multi-turn, but the servo is single-turn again (power cycled
+    // on its own): the turn count is gone. beginJog()/moveRelative() handle it.
+    status.tracking_lost = status.tracking &&
+                           (status.min_limit_counts != 0 || status.max_limit_counts != 0);
+  }
   readByteOk(id, SMS_STS_PRESENT_VOLTAGE, status.voltage_dv);
   readByteOk(id, SMS_STS_PRESENT_TEMPERATURE, status.temperature_c);
   readByteOk(id, SMS_STS_MOVING, status.moving);
@@ -361,9 +381,7 @@ StsMoveResult StsServoBus::moveRelative(uint8_t id, int32_t delta_counts,
 #else
   int min_limit = -1;
   int max_limit = -1;
-  if (!readWordOk(id, SMS_STS_MIN_ANGLE_LIMIT_L, min_limit) ||
-      !readWordOk(id, SMS_STS_MAX_ANGLE_LIMIT_L, max_limit) ||
-      min_limit != 0 || max_limit != 0) {
+  if (!readAngleLimits(id, min_limit, max_limit) || min_limit != 0 || max_limit != 0) {
     // Limits restored: the servo was power-cycled and its turn count reset.
     state.valid = false;
     snprintf(detail, detail_size, "reason=multi_turn_lost (retry)");
@@ -480,15 +498,45 @@ StsMoveResult StsServoBus::moveToAngle(uint8_t id, float angle_deg,
   return moveRelative(id, delta_counts, abort_requested, detail, detail_size);
 }
 
-bool StsServoBus::beginJog(uint8_t id, char* detail, size_t detail_size) {
+bool StsServoBus::beginJog(uint8_t id, StsJogTracking& tracking, char* detail,
+                          size_t detail_size) {
   detail[0] = '\0';
+  tracking = StsJogTracking::KEPT;
   if (!initialized_ || !validId(id)) {
     snprintf(detail, detail_size, "reason=invalid_id");
     return false;
   }
   if (!checkReady(id, detail, detail_size)) return false;
   Track& state = track(id);
-  if (!state.valid && !enableTracking(id, detail, detail_size)) return false;
+#if !SIMULATION_MODE
+  if (state.valid) {
+    // Must run before the hold check: in single-turn mode a tracked goal outside
+    // 0..4095 is clamped, so the hold would turn the servo to an end and then
+    // drop torque. Unlike moveRelative() (rejects once), a jog re-enables
+    // multi-turn at once: the operator is pressing the button and the jog is
+    // relative. The old absolute position is lost; tracking=RESET says so.
+    int min_limit = -1;
+    int max_limit = -1;
+    if (!readAngleLimits(id, min_limit, max_limit)) {
+      snprintf(detail, detail_size, "reason=read_failed");
+      return false;
+    }
+    if (min_limit != 0 || max_limit != 0) {
+      state.valid = false;
+      tracking = StsJogTracking::RESET;
+    }
+  }
+#endif
+  if (!state.valid) {
+    if (tracking != StsJogTracking::RESET) tracking = StsJogTracking::NEW;
+    if (!enableTracking(id, detail, detail_size)) {
+      if (tracking == StsJogTracking::RESET) {
+        const size_t used = strlen(detail);
+        snprintf(detail + used, detail_size - used, " multi_turn_lost=YES");
+      }
+      return false;
+    }
+  }
 #if SIMULATION_MODE
   state.jogging = true;
   state.jog_goal_counts = state.abs_counts;

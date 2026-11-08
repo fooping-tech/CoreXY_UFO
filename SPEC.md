@@ -1389,3 +1389,16 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - ジョグ(ジョイスティック/Serial `JOG`共通)は、XY速度に加えて各モータのSTEP周波数を`JOG_MAX_MOTOR_STEPS_S`(=JOY_MAX_FEED 12000mm/minのX単独時 = 16000 steps/s)以下に抑える。CoreXYは斜め45度で片側モータが√2倍速くなるため、方向を保ったまま全体を縮める(斜めは合成約8485mm/min、各軸100mm/s)。ソフトリミット減速の後に適用する。
 - 実機: 純X 15909mm/min(21200 steps/s)で脱調、12000mm/min(16000 steps/s)で問題なし。
 - HOMEの`HOME_X|HOME_Y set zero ...`行の末尾に`before_zero=`を追加。スイッチが反応した時点の論理位置(前回HOMEからステップ数で追跡、ZEROでリセット)で、脱調がなければ約0(±0.05mm程度)、ずれは失った距離。先頭トークンは不変。
+
+## 2026-11-08: サーボだけ電源が切れたあとの多回転の検知と再設定(Issue #11)
+
+依頼: CoreXY_UFO_Game `docs/HANDOFF_FIRMWARE_Z_SERVO.md`(ゲーム側 Issue #62)。手順: `tools/serial_tool/docs/servo-power-cycle-check.md`。
+
+- 前提: 多回転(角度制限`0/0`)はEEPROMロックのまま書くため、STS3020だけの電源断で`0/4095`(1回転)に戻る。Core2側の追跡(`Track::valid`)は残るので、追跡中なのにサーボは1回転モード、という状態になる。回転数(絶対位置)は失われている。
+- `beginJog()`(Serial `JOG`、ジョイスティック共通): 追跡中なら、保持確認(`holdAndVerify`)の前に角度制限を読む。`0/0`でなければ追跡を無効にし、その場で`enableTracking()`(電源投入状態の確認 → `MAX_ANGLE_LIMIT`=0)で多回転に戻して続ける。`abs`は今の1回転内の位置から振り直す。
+  - 保持確認より前に行う理由: 1回転モードでは0〜4095外のゴールが端に丸められるため、古い`abs`で保持するとサーボが端まで回り、保持確認がずれを見てトルクを切る(荷重のあるZが落ちうる)。
+  - `JOG servo id=N begin_ms=.. (hold check; XY waits) tracking=KEPT|NEW|RESET`: KEPT=追跡継続(`abs`連続)、NEW=未追跡から開始、RESET=多回転喪失から再設定(`abs`の基準が変わった)。再設定に失敗したら`JOG servo id=N disabled reason=.. multi_turn_lost=YES`。
+  - `JOG`はボタンを押している間の相対移動なので、押し直しを求めずにその場で戻す。
+- `SERVO_TURN`/`SERVO_ANGLE`(`moveRelative`)は従来どおり: 追跡中に制限が戻っていれば、動かす前に`result=REJECTED reason=multi_turn_lost (retry)`。次の指令で多回転に戻す。`SERVO_ANGLE`は`moveRelative`経由なので同じ確認を通る。
+- `SERVO_STATUS`: 追跡中なのに制限が`0/0`でなければ`tracking=LOST`(従来は`tracking=YES`と`limits=0/4095`が同時に出た)。読むだけで状態は変えない。値は`YES|NO|LOST`。
+- ジョグ中にサーボの電源が切れた場合は対象外: 位置が読めなくなれば従来どおり`STS_TEST_MAX_READ_GAP_MS`後に`feedback_lost`で止める。

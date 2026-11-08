@@ -2676,3 +2676,21 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 - [x] HOMEログに`before_zero=`(脱調量の確認用)
 - [x] 実機: HOME → 純X 200mm/s(12000)で60〜300mmを3往復 → 斜め全速要求を2往復 → HOMEで`before_zero` X=-0.025 / Y=0.000(初回HOMEのばらつき-0.050と同程度、脱調なし)。斜めはVX=VY=100.0mm/sで頭打ち、Y上限付近ではYがソフトリミットで減速しXが加速(壁沿いのすべり)
 - [ ] ジョイスティックでの長時間・負荷(Zドラム)付きの高速ジョグ
+
+## 2026-11-08: サーボだけ電源が切れたあとのJOG(Issue #11、CoreXY_UFO_Game HANDOFF_FIRMWARE_Z_SERVO)
+
+- [x] `beginJog()`: 保持確認の前に角度制限を確認。戻っていれば多回転に再設定して続け、`tracking=RESET`(依頼3.1 (a))
+- [x] `JOG servo id=N begin_ms=..`の末尾に`tracking=KEPT|NEW|RESET`
+- [x] `SERVO_STATUS`: 追跡中かつ制限≠0/0で`tracking=LOST`(依頼3.2)
+- [x] `SERVO_TURN`/`SERVO_ANGLE`は変更なし(1回拒否→次で再設定)。`SERVO_ANGLE`は`moveRelative`経由で確認済み(依頼3.3)
+- [x] ビルド(m5stack-core2 / sim / hwtest)、nativeテスト
+- [x] チェック: `servo_power_cycle_check.py`、`examples/servo_power_cycle_check.csv`、`docs/servo-power-cycle-check.md`
+- [ ] 書き込み・SELFTEST
+- [ ] 実機: Z(ID 1)を数回転下げる → サーボだけ電源断 → `SERVO_STATUS 1`が`tracking=LOST` → JOGで`tracking=RESET`、1回転の端で止まらない
+- [ ] 実機: 爪(ID 2)で同じ。ジョイスティックのZ/アームでも同じ
+- [ ] 実機: `SERVO_TURN`の1回拒否→再試行PASS(`--servo-turn`)
+
+未解決リスク:
+
+- 再設定は`enableTracking()`の電源投入状態の判定(goal=0かつtorque=0、またはgoal≈raw)に頼る。電源断後に手でドラムを1回転以上回した場合は区別できない(従来どおり)。
+- ジョグ中の電源断から短時間で復帰した場合(読出し欠落が`STS_TEST_MAX_READ_GAP_MS`未満)は、端で止まっても検知しない。
