@@ -1734,8 +1734,12 @@ void runJogSession(const JogRequest& first, JogSource first_source) {
   }
   updateMachinePositionEstimateFromBackend(reference);
   stepper_backend.configureDefaultSpeed();
+  // Hold every servo first, then wait for each to settle.
   for (int i = 0; i < 2; ++i) {
     if (servo_begun[i]) sts_servo_bus.endJog(SERVO_IDS[i]);
+  }
+  for (int i = 0; i < 2; ++i) {
+    if (servo_begun[i]) sts_servo_bus.waitJogSettled(SERVO_IDS[i]);
   }
   pos_reporter.poll(true);
   if (require_release) {

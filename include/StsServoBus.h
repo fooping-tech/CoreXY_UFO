@@ -84,14 +84,17 @@ class StsServoBus {
 
   // Jog (joystick / Serial JOG). beginJog() enables tracking and runs the hold
   // check once; updateJog() keeps the goal "lead" ahead of the tracked
-  // position (0 holds); endJog() holds at the current position and tracks the
-  // servo until it settles (up to STS_JOG_SETTLE_TIMEOUT_MS).
+  // position (0 holds); endJog() holds at the current position.
+  // waitJogSettled() then tracks the servo until it settles (up to
+  // STS_JOG_SETTLE_TIMEOUT_MS from the hold). Call endJog() for every jogged
+  // servo first, so none keeps running toward its lead goal during the wait.
   // false from beginJog/updateJog means the servo must not be jogged further
   // in this session; detail has the reason. tracking tells the caller whether
   // the absolute position continues (KEPT) or was set anew (NEW/RESET).
   bool beginJog(uint8_t id, StsJogTracking& tracking, char* detail, size_t detail_size);
   bool updateJog(uint8_t id, int32_t counts_s, char* detail, size_t detail_size);
   void endJog(uint8_t id);
+  void waitJogSettled(uint8_t id);
 
  private:
   struct Track {
@@ -102,6 +105,10 @@ class StsServoBus {
     bool jogging = false;
     int32_t jog_goal_counts = 0;
     uint32_t jog_last_good_read_ms = 0;
+    // Set by endJog(), consumed by waitJogSettled().
+    bool jog_settle_pending = false;
+    int32_t jog_hold_counts = 0;
+    uint32_t jog_hold_ms = 0;
   };
 
   bool validId(uint8_t id) const;

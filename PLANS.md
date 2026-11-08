@@ -2690,6 +2690,7 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 - [x] 実機 Z(ID 1) `--id 1 --servo-turn` 9/9 PASS: 電源断後`tracking=LOST limits=0/4095` → JOG `tracking=RESET` → 再JOG `tracking=KEPT`、raw 189→3318(0をまたいで-966 counts)。`SERVO_TURN`は1回目`REJECTED multi_turn_lost`、2回目PASS
 - [x] 実機 爪(ID 2) `--id 2 --rate 400` 7/7 PASS: raw 3666→87→595(4095をまたぐ)、`RESET`→`KEPT`
 - [x] サーボ電源はID 1/2共通(ユーザー確認)。電源断で両方が同時に多回転を失う
+- [x] Codexレビュー(P2)対応: Z/爪同時ジョグで`endJog(1)`の待ち中に爪が先読みgoalへ進み続ける → `endJog()`(hold)と`waitJogSettled()`(待ち)に分け、全サーボをholdしてから待つ。待ちの上限はhold時刻から数える。実機: Z -600 / 爪 +300 counts/sの同時ジョグを連続3回、すべて`tracking=KEPT`、停止後は両方moving=0・保持点±2 counts、`JOG 0 0`→`JOG end` 約0.4s、SELFTEST PASS
 - [ ] ジョイスティックのZ/アームで、電源断後の最初の押下で動く(目視)
 
 未解決リスク:

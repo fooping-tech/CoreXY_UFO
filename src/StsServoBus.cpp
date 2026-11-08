@@ -630,18 +630,30 @@ void StsServoBus::endJog(uint8_t id) {
   int raw_counts = 0;
   if (readRawPosition(id, raw_counts)) updateTracking(state, raw_counts);
   // Hold where it is instead of dropping torque (a loaded Z drum would fall).
-  const int32_t hold_counts = state.abs_counts;
-  servo.WritePosEx(id, static_cast<int16_t>(hold_counts), STS_TEST_SPEED_COUNTS_PER_S,
-                   STS_TEST_ACC);
+  state.jog_hold_counts = state.abs_counts;
+  state.jog_hold_ms = millis();
+  state.jog_settle_pending = true;
+  servo.WritePosEx(id, static_cast<int16_t>(state.jog_hold_counts),
+                   STS_TEST_SPEED_COUNTS_PER_S, STS_TEST_ACC);
+#endif
+}
+
+void StsServoBus::waitJogSettled(uint8_t id) {
+  if (!validId(id)) return;
+  Track& state = track(id);
+  if (!state.jog_settle_pending) return;
+  state.jog_settle_pending = false;
+#if !SIMULATION_MODE
   // The servo decelerates past the hold point and comes back (about 80 counts
   // at 800 counts/s, measured). Keep tracking until it settles, or the next
-  // beginJog()/moveRelative() sees the overshoot as idle drift.
-  const uint32_t started_ms = millis();
-  while (millis() - started_ms < STS_JOG_SETTLE_TIMEOUT_MS) {
+  // beginJog()/moveRelative() sees the overshoot as idle drift. The timeout
+  // counts from the hold, so waiting for several servos in turn stays bounded.
+  while (millis() - state.jog_hold_ms < STS_JOG_SETTLE_TIMEOUT_MS) {
     delay(STS_TEST_POLL_INTERVAL_MS);
+    int raw_counts = 0;
     if (!readRawPosition(id, raw_counts)) continue;
     updateTracking(state, raw_counts);
-    if (labs(state.abs_counts - hold_counts) <= STS_TEST_TOLERANCE_COUNTS &&
+    if (labs(state.abs_counts - state.jog_hold_counts) <= STS_TEST_TOLERANCE_COUNTS &&
         servo.ReadMove(id) == 0) {
       break;
     }

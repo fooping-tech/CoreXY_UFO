@@ -1402,5 +1402,5 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - `SERVO_TURN`/`SERVO_ANGLE`(`moveRelative`)は従来どおり: 追跡中に制限が戻っていれば、動かす前に`result=REJECTED reason=multi_turn_lost (retry)`。次の指令で多回転に戻す。`SERVO_ANGLE`は`moveRelative`経由なので同じ確認を通る。
 - `SERVO_STATUS`: 追跡中なのに制限が`0/0`でなければ`tracking=LOST`(従来は`tracking=YES`と`limits=0/4095`が同時に出た)。読むだけで状態は変えない。値は`YES|NO|LOST`。
 - ジョグ中にサーボの電源が切れた場合は対象外: 位置が読めなくなれば従来どおり`STS_TEST_MAX_READ_GAP_MS`後に`feedback_lost`で止める。
-- `endJog()`: hold指令後、サーボが止まるまで(保持点±`STS_TEST_TOLERANCE_COUNTS`かつmoving=0、最大`STS_JOG_SETTLE_TIMEOUT_MS` 600ms)追跡を続ける。サーボは減速で保持点を越えて戻る(800 counts/sで約80 counts、2026-11-08実測)。従来はhold直後に戻っていたので、0.5秒以内に次のJOG/`SERVO_TURN`を始めると、戻り分が待機中のずれ(`idle_drift`)とみなされ追跡が無効になっていた(実機で再現)。この待ちの間motionTaskは次のコマンドを処理しない(`JOG end`行はその後に出る)。
+- `endJog()`でhold指令、`waitJogSettled()`で待つ(全サーボをholdしてから順に待つ。待ちの上限はhold時刻から数える)。サーボが止まるまで(保持点±`STS_TEST_TOLERANCE_COUNTS`かつmoving=0、最大`STS_JOG_SETTLE_TIMEOUT_MS` 600ms)追跡を続ける。サーボは減速で保持点を越えて戻る(800 counts/sで約80 counts、2026-11-08実測)。従来はhold直後に戻っていたので、0.5秒以内に次のJOG/`SERVO_TURN`を始めると、戻り分が待機中のずれ(`idle_drift`)とみなされ追跡が無効になっていた(実機で再現)。この待ちの間motionTaskは次のコマンドを処理しない(`JOG end`行はその後に出る)。
 - 実機構成: Z(ID 1)と爪(ID 2)のサーボ電源は共通。電源断では両方が同時に多回転を失う。
