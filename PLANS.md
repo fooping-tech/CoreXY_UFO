@@ -2676,3 +2676,15 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 - [x] HOMEログに`before_zero=`(脱調量の確認用)
 - [x] 実機: HOME → 純X 200mm/s(12000)で60〜300mmを3往復 → 斜め全速要求を2往復 → HOMEで`before_zero` X=-0.025 / Y=0.000(初回HOMEのばらつき-0.050と同程度、脱調なし)。斜めはVX=VY=100.0mm/sで頭打ち、Y上限付近ではYがソフトリミットで減速しXが加速(壁沿いのすべり)
 - [ ] ジョイスティックでの長時間・負荷(Zドラム)付きの高速ジョグ
+
+## 2026-10-25: 開発ワークフロー(/devスキル)とCI(Issue #9)
+
+- [x] `.claude/skills/dev/`: Issue→PR→マージのワークフロー。状態取得`dev-state.sh`、検証`verify.sh`
+- [x] `.claude/hooks/git-guard.sh`: main直push、force push、破壊的git、認証情報のコミットをブロック
+- [x] `.github/workflows/ci.yml`: nativeテスト、pytest、全5 envのビルド
+- [x] `platformio.ini`の`platform`を`espressif32@6.12.0`(Arduino core 2.0.17)に固定。固定しないと新しい環境ではArduino core 3.x(espressif32 7.x)が入り、ESP-NOW受信コールバックの型変更(`esp_now_recv_info`)で`JoystickLink.cpp`と`AtomJoyMain.cpp`がビルドできない(初回CIで確認)
+
+未解決リスク:
+
+- Arduino core 3.xへ移行する場合は、ESP-NOWコールバックの型変更などに対応してからこの固定を外す。
+- mainのブランチ保護は未設定。いまはClaude Codeのhookでのみ防いでいる。
