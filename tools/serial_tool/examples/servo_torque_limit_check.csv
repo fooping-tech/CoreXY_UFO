@@ -1,0 +1,10 @@
+command,delay_ms,expect,comment
+SERVO_STATUS 1,500,max_torque=1000,Z drum: EEPROM max torque stays 100 %
+SERVO_STATUS 2,500,max_torque=1000,Arm: EEPROM max torque stays 100 % (torque_limit is 1000 after servo power-up; 500 once it has moved)
+TEST_MODE ON,500,TEST_MODE result=ON,Enter test mode (servo moves need it)
+SERVO_TURN 2 0.05,6000,SERVO_TURN id=2 result=PASS,ARM MOVES 18 deg: keep the claw clear. Torque limit is written just before torque ON
+SERVO_STATUS 2,500,torque_limit=500 max_torque=1000,Arm: RAM torque limit is 50 %
+SERVO_TURN 2 -0.05,6000,SERVO_TURN id=2 result=PASS,Arm back
+SERVO_STATUS 2,500,torque_limit=500 max_torque=1000,Arm: still 50 %
+SERVO_STATUS 1,500,torque_limit=1000 max_torque=1000,Z drum: unchanged 100 % (not moved by this check)
+TEST_MODE OFF,500,TEST_MODE result=OFF,Leave test mode

@@ -2717,6 +2717,7 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 - [x] ID 2のみtorque ON直前にRAMトルク制限500を書く(`STS_ARM_TORQUE_LIMIT`)。ID 1は1000
 - [x] `verify.sh` PASS(secret-scan、native、Python、m5stack-core2 / sim / hwtestビルド)
 - [x] 書き込み、起動ログ(ID 1/2 ping=OK)、`SERVO_STATUS 1/2`応答
+- [x] チェック: `examples/servo_torque_limit_check.csv`、`docs/servo-torque-limit-check.md`(Codexレビュー P1)。`--dry-run`のみ実施
 - [ ] 実機でID 2を動かした後に`torque_limit=500`となること(ユーザー判断で今回は動かしていない)
 - [ ] サーボ電源再投入 → 次の動作で500へ戻ること
 - [ ] 50%で爪の把持力が足りるか
