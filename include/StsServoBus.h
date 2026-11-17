@@ -28,6 +28,10 @@ struct StsServoStatus {
   int voltage_dv = -1;
   int temperature_c = -1;
   int moving = -1;
+  // Torque limit in 0.1 % of stall torque (1000 = 100 %). torque_limit is the
+  // RAM value in effect; it reloads from max_torque (EEPROM) at servo power-up.
+  int torque_limit = -1;
+  int max_torque = -1;
   bool tracking = false;
   // tracking is set but the angle limits are no longer 0/0 (servo power cycled
   // on its own). abs_counts is stale; reported as tracking=LOST.

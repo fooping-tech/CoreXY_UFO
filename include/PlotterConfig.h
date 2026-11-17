@@ -177,6 +177,17 @@ constexpr uint8_t STS_SERVO_ID_MIN = 1;
 constexpr uint8_t STS_SERVO_ID_MAX = 2;
 // 1回転 = 4096 counts。
 constexpr int32_t STS_COUNTS_PER_TURN = 4096;
+// トルク制限 [0.1 %、1000 = 100 %]。torque ONの直前にRAM(48-49)へ書く。
+// EEPROMの最大トルク(16-17)は変えないため、サーボ電源再投入で1000へ戻り、
+// 次の動作開始時に書き直す。
+// 2026-11-17: ID 2(アーム/爪)を実測1000から500へ(ユーザー要望)。ID 1(Z軸)は
+// 荷重を保持するため100 %のまま。
+constexpr uint16_t STS_TORQUE_LIMIT_MAX = 1000;
+constexpr uint16_t STS_ARM_SERVO_ID = 2;
+constexpr uint16_t STS_ARM_TORQUE_LIMIT = 500;
+constexpr uint16_t stsTorqueLimit(uint8_t id) {
+  return id == STS_ARM_SERVO_ID ? STS_ARM_TORQUE_LIMIT : STS_TORQUE_LIMIT_MAX;
+}
 // テストモードのサーボ速度。ACC単位は100 counts/s^2。
 // 2026-10-22: 800から2400 counts/s(約0.6 rev/s、211deg/s)へ(ユーザー要望)。
 // STS3020の無負荷最大は7.4Vで約4500 counts/s。ACCは2400到達0.48s(約580 counts)。

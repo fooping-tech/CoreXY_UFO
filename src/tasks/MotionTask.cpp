@@ -1229,13 +1229,14 @@ void handleServoStatus(uint8_t id) {
   }
   logMessage("SERVO_STATUS id=%u result=OK flags=0x%02X mode=%d torque=%d raw=%d "
              "goal=%d limits=%d/%d tracking=%s abs=%ld turns=%.2f voltage=%.1f "
-             "temp=%d moving=%d",
+             "temp=%d moving=%d torque_limit=%d max_torque=%d",
              id, status.error_flags, status.mode, status.torque, status.raw_counts,
              status.goal_counts, status.min_limit_counts, status.max_limit_counts,
              status.tracking_lost ? "LOST" : (status.tracking ? "YES" : "NO"),
              static_cast<long>(status.abs_counts),
              static_cast<float>(status.abs_counts) / STS_COUNTS_PER_TURN,
-             status.voltage_dv * 0.1f, status.temperature_c, status.moving);
+             status.voltage_dv * 0.1f, status.temperature_c, status.moving,
+             status.torque_limit, status.max_torque);
 }
 
 void handleServoMove(const CommandMessage& command) {
