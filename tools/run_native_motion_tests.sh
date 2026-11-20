@@ -14,3 +14,11 @@ c++ -std=c++17 -Iinclude -Itest/native \
   -o /tmp/corexy_plotter_native_joystick_tests
 
 /tmp/corexy_plotter_native_joystick_tests
+
+c++ -std=c++17 -DSIMULATION_MODE=1 \
+  -Iinclude -Itest/native \
+  test/native/test_timed_segment_feeder.cpp \
+  src/CoreXYKinematics.cpp src/SegmentGenerator.cpp src/SegmentQueue.cpp \
+  -o /tmp/corexy_plotter_native_timed_segment_tests
+
+/tmp/corexy_plotter_native_timed_segment_tests

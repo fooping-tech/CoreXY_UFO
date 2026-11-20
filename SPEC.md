@@ -1412,3 +1412,22 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - ID 2(爪)は`STS_ARM_TORQUE_LIMIT`=500(50%)。ID 1(Z)は荷重を保持するため1000のまま。値は`stsTorqueLimit(id)`(`PlotterConfig.h`)。
 - 書き込みはRAMのみで、torque ONの直前(`holdAndVerify()`と`moveSingleTurn()`)に毎回行う。EEPROMはlockのままで最大トルクは変えない。サーボ電源再投入でRAMは1000へ戻るが、次の`SERVO_TURN`/`SERVO_ANGLE`/JOGの開始時に書き直す。書き込みに失敗したらtorque ONしない(`reason=hold_write_failed`)。
 - 起動時は従来どおり書かない(UART初期化とPINGのみ)。そのため、電源投入から最初の動作までは`SERVO_STATUS`が`torque_limit=1000`を返す。
+
+## 2026-11-20: timed segmentの投入の修正と失敗時の診断(Issue #15)
+
+- 症状(2026-11-19、ゲーム側ログ): ほぼ45°のXY移動(B/Aステップ比0.018、0.046)で、開始の約1秒後に`timed segment queue lost position confidence`。このアラームはキュー投入の失敗をソフトウェアが検出したもので、脱調の検出ではない。
+- **原因は未特定。** 1000msで諦めるのは「Aを積んだ後、Bの`moveTimed()`が再試行の戻り値を返し続けた」場合だけなので、そこを通ったと推定している。どの戻り値だったかは採れていない。FastAccelStepperのキューの動作を模したnativeテストでは、Issueの2例を含むどの比でも再現しない(MCPWM/PCNTドライバは模していない)。
+- A/Bへの投入は`TimedSegmentFeeder.h`(`timed_segment::Feeder`)に分けた。Arduino/FastAccelStepperに依存しないのでnativeでテストできる。`StepperBackendFastAccel`の中だけで使う。plannerではない。
+- `moveTimed()`の戻り値の扱い(FastAccelStepper 2.0.0のAPIどおり):
+  - `OK`(0)、`MOVE_TIMED_EMPTY`(8): 登録済み。
+  - `DirPin2msPauseAdded`(5)、`DirChangePauseInjected`(6): 方向切替の待機だけが積まれ、**移動は未登録**。待機のtickを記録して同じ移動をすぐ送り直す(1回の投入で最大4回)。従来は5を「登録済み」と扱っていた。現在の配線(DIRピン直結)で返るのは6で、6は従来も再試行していたので、この点は現在の実機の症状の原因ではない。
+  - その他の正の値: 再試行。負の値: エラー。
+- A/Bの時間差の補正: 方向切替の待機と`moveTimed()`のtickの丸めで、A/Bに積んだ時間に差が出る。差が`MIN_CMD_TICKS`(3200 ticks = 200us)以上になったら、短い側に同じ長さの待機を積む。従来は`actual_*_ticks`を取るだけで使っていなかった。
+- `MOVE_TIMED_EMPTY`を、開始前(最初のセグメント)と実行中で区別する。実行中に出たら、その軸のキューが空になった(underrun)。到達ステップ数は正しいが途中の経路は計画どおりではないので、移動の完了時に`WARN: timed segment queue ran dry during the move`と`TIMED_SEGMENT_STATS`を出す。アラームにはしない。
+- A/B両方のキューにセグメント全体が入ることを確かめてからAを積む(従来どおり)。必要エントリ数の見積もりは、`moveTimed()`が実際に使う数を下回らないようにした(1 stepあたりの待機の分割で1つ多く使う場合があった)。
+- Aを積んだ後にBが断られ続けた場合、1000msで停止する(`TIMED_SEGMENT_PARTIAL_RETRY_TIMEOUT_MS`、従来どおり)。原因が分からないまま延ばしていない。
+- `startTimedSegments()`: キューが実際に動き出したかを確かめる。動かなければ20ms(`TIMED_SEGMENT_START_TIMEOUT_MS`)まで再試行し、それでも動かなければアラーム。従来は`moveTimed(0, 0, nullptr, true)`の戻り値(失敗しても`OK`)だけを見ていた。
+- 失敗時の診断: アラームの行に続けて`TIMED_SEGMENT_FAIL stage=.. segment=.. start=.. raw_a=.. raw_b=.. a_steps=.. b_steps=.. ticks=.. entries_a=.. entries_b=.. running_a=.. running_b=.. waited_ms=.. b_retries=.. pause_ticks_a=.. pause_ticks_b=.. skew_ticks=..`と`TIMED_SEGMENT_STATS segments=.. underruns_a=.. underruns_b=.. pauses_a=.. pauses_b=.. pad_ticks_a=.. pad_ticks_b=.. b_retries=.. max_b_wait_ms=.. skew_ticks=..`を出す。投入中は出力せず、停止後に出す。フィールドの意味は`tools/serial_tool/docs/timed-segment-diagonal-check.md`。
+- `platformio.ini`: `gin66/FastAccelStepper@2.0.0`に固定(従来は版の指定なし)。ローカルの`.pio/libdeps`は2026-10-07から2.0.0で、実機はこのビルドで書き込んでいる。戻り値の数値は`static_assert`でライブラリと照合する。
+- 機械的な脱調は別の問題として扱う。この変更は脱調の対策ではない。
+

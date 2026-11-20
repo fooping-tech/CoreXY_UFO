@@ -9,6 +9,53 @@ namespace {
 FastAccelStepperEngine engine;
 constexpr uint8_t TIMED_SEGMENT_DIRECTION_ENTRY_MARGIN = 2;
 constexpr uint32_t TIMED_SEGMENT_PARTIAL_RETRY_TIMEOUT_MS = 1000;
+// FastAccelStepper says a direction change needs at most three pauses.
+constexpr uint8_t TIMED_SEGMENT_MAX_PAUSE_INJECTIONS = 4;
+// A stopped queue refuses commands until its timer has run out (one queue
+// entry, 4.1 ms at most). Starting is retried for this long.
+constexpr uint32_t TIMED_SEGMENT_START_TIMEOUT_MS = 20;
+
+// TimedSegmentFeeder.h mirrors these so that it builds without the library.
+static_assert(static_cast<int8_t>(MOVE_TIMED_OK) == timed_segment::RESULT_OK,
+              "MOVE_TIMED_OK changed");
+static_assert(static_cast<int8_t>(MOVE_TIMED_EMPTY) ==
+                  timed_segment::RESULT_MOVE_EMPTY,
+              "MOVE_TIMED_EMPTY changed");
+static_assert(static_cast<int8_t>(MoveTimedResultCode::DirPin2msPauseAdded) ==
+                  timed_segment::RESULT_DIR_PIN_2MS_PAUSE_ADDED,
+              "DirPin2msPauseAdded changed");
+static_assert(static_cast<int8_t>(MoveTimedResultCode::DirChangePauseInjected) ==
+                  timed_segment::RESULT_DIR_CHANGE_PAUSE_INJECTED,
+              "DirChangePauseInjected changed");
+
+timed_segment::Config timedSegmentConfig() {
+  timed_segment::Config config;
+  config.queue_len = QUEUE_LEN;
+  config.direction_entry_margin = TIMED_SEGMENT_DIRECTION_ENTRY_MARGIN;
+  config.min_pause_ticks = MIN_CMD_TICKS;
+  config.partial_retry_timeout_ms = TIMED_SEGMENT_PARTIAL_RETRY_TIMEOUT_MS;
+  config.max_pause_injections = TIMED_SEGMENT_MAX_PAUSE_INJECTIONS;
+  return config;
+}
+
+#if !SIMULATION_MODE
+struct FasTimedAxis {
+  FastAccelStepper* motor;
+  int8_t moveTimed(int16_t steps, uint32_t ticks, uint32_t* actual_ticks,
+                   bool start) {
+    return static_cast<int8_t>(motor->moveTimed(steps, ticks, actual_ticks, start));
+  }
+  uint16_t queueEntries() const { return motor->queueEntries(); }
+  // The driver state. FastAccelStepper::isRunning() is also true while
+  // entries wait in a queue that has not been started.
+  bool isRunning() const { return motor->isQueueRunning(); }
+};
+
+struct RtosRetryClock {
+  uint32_t nowMs() { return millis(); }
+  void waitMs() { vTaskDelay(pdMS_TO_TICKS(1)); }
+};
+#endif
 
 // 論理A/B(CoreXY A=X+Y, B=X-Y)を出力する物理STEP/DIRピン。
 // MOTOR_AB_SWAPPEDで配線の入れ替えをここだけで吸収する。
@@ -47,6 +94,7 @@ StepperBackend::DiagnosticPulseResult queueDiagnosticPulseOnMotor(
 }
 
 bool StepperBackendFastAccel::begin() {
+  timed_segment_feeder_ = timed_segment::Feeder(timedSegmentConfig());
 #if !SIMULATION_MODE
   engine.init();
   motor_a_ = engine.stepperConnectToPin(LOGICAL_A_STEP_PIN);
@@ -127,60 +175,26 @@ StepperBackend::TimedSegmentResult StepperBackendFastAccel::queueTimedSegment(
   if (motor_a_ == nullptr || motor_b_ == nullptr) {
     return TimedSegmentResult::ERROR;
   }
-  if (segment.a_steps < INT16_MIN || segment.a_steps > INT16_MAX ||
-      segment.b_steps < INT16_MIN || segment.b_steps > INT16_MAX ||
-      segment.duration_us == 0) {
+  // duration_us comes from ~20 ms segments; reject what would overflow ticks.
+  if (segment.duration_us > UINT32_MAX / (TICKS_PER_S / 1000000UL)) {
     return TimedSegmentResult::ERROR;
   }
   const uint32_t duration_ticks =
       segment.duration_us * (TICKS_PER_S / 1000000UL);
-  if (estimateMoveTimedEntries(segment.a_steps, duration_ticks) +
-              TIMED_SEGMENT_DIRECTION_ENTRY_MARGIN >=
-          QUEUE_LEN ||
-      estimateMoveTimedEntries(segment.b_steps, duration_ticks) +
-              TIMED_SEGMENT_DIRECTION_ENTRY_MARGIN >=
-          QUEUE_LEN) {
-    return TimedSegmentResult::ERROR;
+  FasTimedAxis axis_a{motor_a_};
+  FasTimedAxis axis_b{motor_b_};
+  RtosRetryClock clock;
+  switch (timed_segment_feeder_.feed(axis_a, axis_b, clock, segment.a_steps,
+                                     segment.b_steps, duration_ticks, start)) {
+    case timed_segment::FeedResult::QUEUED:
+      return TimedSegmentResult::QUEUED;
+    case timed_segment::FeedResult::RETRY:
+      return TimedSegmentResult::RETRY;
+    case timed_segment::FeedResult::ERROR:
+      break;
   }
-  if (!hasTimedSegmentCapacity(segment, duration_ticks)) {
-    return TimedSegmentResult::RETRY;
-  }
-  uint32_t actual_a_ticks = 0;
-  uint32_t actual_b_ticks = 0;
-  const MoveTimedResultCode result_a = motor_a_->moveTimed(
-      static_cast<int16_t>(segment.a_steps), duration_ticks, &actual_a_ticks,
-      start);
-  const TimedSegmentResult mapped_a =
-      mapMoveTimedResult(static_cast<int8_t>(result_a));
-  if (mapped_a != TimedSegmentResult::QUEUED) return mapped_a;
-
-  const MoveTimedResultCode result_b = motor_b_->moveTimed(
-      static_cast<int16_t>(segment.b_steps), duration_ticks, &actual_b_ticks,
-      start);
-  TimedSegmentResult mapped_b =
-      mapMoveTimedResult(static_cast<int8_t>(result_b));
-  if (mapped_b == TimedSegmentResult::ERROR) {
-    stop();
-    return TimedSegmentResult::ERROR;
-  }
-  const uint32_t retry_start_ms = millis();
-  while (mapped_b == TimedSegmentResult::RETRY) {
-    if (millis() - retry_start_ms >= TIMED_SEGMENT_PARTIAL_RETRY_TIMEOUT_MS) {
-      stop();
-      return TimedSegmentResult::ERROR;
-    }
-    vTaskDelay(pdMS_TO_TICKS(1));
-    const MoveTimedResultCode retry_b = motor_b_->moveTimed(
-        static_cast<int16_t>(segment.b_steps), duration_ticks, &actual_b_ticks,
-        start);
-    mapped_b = mapMoveTimedResult(static_cast<int8_t>(retry_b));
-    if (mapped_b == TimedSegmentResult::ERROR) {
-      stop();
-      return TimedSegmentResult::ERROR;
-    }
-  }
-
-  return TimedSegmentResult::QUEUED;
+  stop();
+  return TimedSegmentResult::ERROR;
 #endif
 }
 
@@ -189,13 +203,28 @@ bool StepperBackendFastAccel::startTimedSegments() {
   return true;
 #else
   if (motor_a_ == nullptr || motor_b_ == nullptr) return false;
-  const MoveTimedResultCode result_a = motor_a_->moveTimed(0, 0, nullptr, true);
-  const MoveTimedResultCode result_b = motor_b_->moveTimed(0, 0, nullptr, true);
-  return mapMoveTimedResult(static_cast<int8_t>(result_a)) ==
-             TimedSegmentResult::QUEUED &&
-         mapMoveTimedResult(static_cast<int8_t>(result_b)) ==
-             TimedSegmentResult::QUEUED;
+  // moveTimed(0, 0, nullptr, true) only starts the queue and reports OK or
+  // EMPTY even when the queue refused to start, so check the driver state.
+  const uint32_t start_ms = millis();
+  for (;;) {
+    motor_a_->moveTimed(0, 0, nullptr, true);
+    motor_b_->moveTimed(0, 0, nullptr, true);
+    const bool started_a = motor_a_->isQueueRunning() || motor_a_->queueEntries() == 0;
+    const bool started_b = motor_b_->isQueueRunning() || motor_b_->queueEntries() == 0;
+    if (started_a && started_b) return true;
+    if (millis() - start_ms >= TIMED_SEGMENT_START_TIMEOUT_MS) return false;
+    vTaskDelay(pdMS_TO_TICKS(1));
+  }
 #endif
+}
+
+const timed_segment::Failure& StepperBackendFastAccel::lastTimedSegmentFailure()
+    const {
+  return timed_segment_feeder_.failure();
+}
+
+const timed_segment::RunStats& StepperBackendFastAccel::timedSegmentStats() const {
+  return timed_segment_feeder_.stats();
 }
 
 bool StepperBackendFastAccel::beginDiagnosticTone() {
@@ -396,50 +425,5 @@ uint16_t StepperBackendFastAccel::motorBQueueEntries() const {
   return 0;
 #else
   return motor_b_ == nullptr ? 0 : motor_b_->queueEntries();
-#endif
-}
-
-StepperBackend::TimedSegmentResult StepperBackendFastAccel::mapMoveTimedResult(
-    int8_t result) const {
-  if (result == static_cast<int8_t>(MOVE_TIMED_OK) ||
-      result == static_cast<int8_t>(MOVE_TIMED_EMPTY) ||
-      result == static_cast<int8_t>(AqeResultCode::DirPin2msPauseAdded)) {
-    return TimedSegmentResult::QUEUED;
-  }
-  if (result > 0) return TimedSegmentResult::RETRY;
-  return TimedSegmentResult::ERROR;
-}
-
-uint16_t StepperBackendFastAccel::estimateMoveTimedEntries(
-    int32_t steps, uint32_t duration_ticks) const {
-  steps = abs(steps);
-  if (duration_ticks == 0) return 0;
-  if (steps == 0) {
-    return static_cast<uint16_t>((duration_ticks + 65534UL) / 65535UL);
-  }
-  uint32_t rate = duration_ticks / static_cast<uint32_t>(steps);
-  if (rate > 65535UL) {
-    const uint16_t commands_per_step = (rate >> 16) + 1;
-    return static_cast<uint16_t>(steps * commands_per_step);
-  }
-  return static_cast<uint16_t>((steps + 254L) / 255L);
-}
-
-bool StepperBackendFastAccel::hasTimedSegmentCapacity(
-    const MotionSegment& segment, uint32_t duration_ticks) const {
-#if SIMULATION_MODE
-  (void)segment;
-  (void)duration_ticks;
-  return true;
-#else
-  const uint16_t needed_a =
-      estimateMoveTimedEntries(segment.a_steps, duration_ticks) +
-      TIMED_SEGMENT_DIRECTION_ENTRY_MARGIN;
-  const uint16_t needed_b =
-      estimateMoveTimedEntries(segment.b_steps, duration_ticks) +
-      TIMED_SEGMENT_DIRECTION_ENTRY_MARGIN;
-  if (needed_a >= QUEUE_LEN || needed_b >= QUEUE_LEN) return false;
-  return motor_a_->queueEntries() + needed_a < QUEUE_LEN &&
-         motor_b_->queueEntries() + needed_b < QUEUE_LEN;
 #endif
 }
