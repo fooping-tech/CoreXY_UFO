@@ -1284,7 +1284,7 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - `TEST_JOG <dx_mm> <dy_mm> [feed]`: テストモード必須、ホーミング不要の相対XY移動。|dx|,|dy|<=50mm、feed (0,1200]、既定600mm/min、TMC ready必須。CoreXYKinematicsでA/B変換し`moveABSteps`(bring-up経路)で実行。
 - `TEST_A`/`TEST_B <steps> [feed]`: feed省略時は従来の速度。
 - `TEST_JOG`/`TEST_A`/`TEST_B`共通: 開始時OFFのX/YリミットがON(rawまたはdebounced)になったら即停止(`result=STOPPED_LIMIT limit=X|Y`)。ONのリミットへ向かう成分を持つ移動は`REJECTED`。alarm中は`REJECTED`。実行するとHOMED解除。結果行`<cmd> result=DONE|STOPPED_LIMIT|STOPPED|REJECTED ...`。
-- `SERVO_STATUS <id>` / `SERVO_OFF <id>`(ID 1..2): 常時可。`SERVO_ANGLE <id> <deg>`(0..360未満、最短経路)/ `SERVO_TURN <id> <turns>`(|turns|<=3。2026-11-20以降はID 1のみ<=6): テストモード必須。800 counts/s、ACC 20。
+- `SERVO_STATUS <id>` / `SERVO_OFF <id>`(ID 1..2): 常時可。`SERVO_ANGLE <id> <deg>`(0..360未満、最短経路)/ `SERVO_TURN <id> <turns>`(|turns|<=3): テストモード必須。800 counts/s、ACC 20。
 - サーボ移動は初回に多回転追跡を開始(角度制限0/0、EEPROM lockのまま)。開始条件・hold check・runaway guard・折り返し補正・読出し欠落500ms・idle drift検出は2026-10-18の単体試験仕様と同じ。ABORT中はtorque OFFではなく現在位置holdで停止(負荷付きZドラムの落下防止)。runaway時はtorque OFF。追跡位置|abs|<=28000 counts。
 - 多回転追跡はテストモード終了後も保持。ESP32再起動後は、角度制限0/0で静止保持中かつgoalと一致する場合のみ復帰、それ以外はサーボ電源再投入が必要。
 - `LogMessage`を320文字へ拡大(POSの`LIMIT_*_RAW`/`TEST_MODE`が切れていたため)。
@@ -1421,6 +1421,6 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - 追跡位置の上限`STS_TEST_ABS_LIMIT_COUNTS`=28000は不変。6回転 = 24576 countsは上限内(`static_assert`)。目標が上限を超える移動は従来どおり`reason=abs_out_of_range`。
 - timeoutは従来の式(移動量 ÷ 2400 counts/s + 2000ms)。6回転は計算上12.24s、実移動は加減速込みで約10.7sの見込み(3回転の実測5.6sから換算。実機未確認)。
 - hold check、runaway guard(50 counts)、読出し欠落(250ms)、`ABORT`でのhold停止は移動量に依存しないため変更なし。
-- `CONFIG`に`SERVO_TURN max_turns id1=6.0 id2=3.0 abs_limit_counts=28000 speed=2400`を追加。ホストはこの行で上限を知る。この行がないファームウェアはどのIDも3回転まで。
+- `CONFIG`に`SERVO_LIMITS max_turns id1=6.0 id2=3.0 abs_limit_counts=28000 speed=2400`を追加。ホストはこの行で上限を知る。この行がないファームウェアはどのIDも3回転まで。先頭トークンを`SERVO_TURN`にしないのは、移動の結果行(`SERVO_TURN id=.. result=..`)と取り違えないため。
 - WebUI `Test`タブの入力上限もIDごと(ID 1は±6、ID 2は±3)。
 
