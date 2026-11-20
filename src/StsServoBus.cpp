@@ -15,6 +15,8 @@ HardwareSerial servo_uart(1);
 SMS_STS servo;
 
 constexpr uint8_t REG_LOCK_LOCKED = 1;
+// EEPROM max torque [0.1 %]; not defined by the FTServo library.
+constexpr uint8_t REG_MAX_TORQUE_L = 16;
 constexpr int MODE_POSITION = 0;
 constexpr int SINGLE_TURN_MAX_LIMIT_COUNTS = 4095;
 
@@ -52,6 +54,13 @@ bool readGoalCounts(uint8_t id, int32_t& goal_counts) {
   goal_counts = (raw & 0x8000) ? -(raw & 0x7FFF) : raw;
   return true;
 }
+#if !SIMULATION_MODE
+// Call before every torque ON: the RAM torque limit reloads from EEPROM
+// (100 %) whenever the servo is power cycled.
+bool writeTorqueLimit(uint8_t id) {
+  return servo.writeWord(id, SMS_STS_TORQUE_LIMIT_L, stsTorqueLimit(id)) != 0;
+}
+#endif
 }  // namespace
 
 const char* stsJogTrackingName(StsJogTracking tracking) {
@@ -143,6 +152,8 @@ bool StsServoBus::readStatus(uint8_t id, StsServoStatus& status) {
   status.min_limit_counts = 0;
   status.max_limit_counts = status.tracking ? 0 : SINGLE_TURN_MAX_LIMIT_COUNTS;
   status.moving = 0;
+  status.torque_limit = stsTorqueLimit(id);
+  status.max_torque = STS_TORQUE_LIMIT_MAX;
   return status.link;
 #else
   if (!ping(id)) return false;
@@ -162,6 +173,8 @@ bool StsServoBus::readStatus(uint8_t id, StsServoStatus& status) {
   readByteOk(id, SMS_STS_PRESENT_VOLTAGE, status.voltage_dv);
   readByteOk(id, SMS_STS_PRESENT_TEMPERATURE, status.temperature_c);
   readByteOk(id, SMS_STS_MOVING, status.moving);
+  readWordOk(id, SMS_STS_TORQUE_LIMIT_L, status.torque_limit);
+  readWordOk(id, REG_MAX_TORQUE_L, status.max_torque);
   return true;
 #endif
 }
@@ -197,7 +210,7 @@ bool StsServoBus::moveSingleTurn(uint8_t id, uint16_t position_counts,
       max_limit != SINGLE_TURN_MAX_LIMIT_COUNTS) {
     return false;
   }
-  if (!servo.EnableTorque(id, 1)) return false;
+  if (!writeTorqueLimit(id) || !servo.EnableTorque(id, 1)) return false;
   if (!servo.WritePosEx(id, position_counts, speed, acc)) return false;
   const uint32_t started_ms = millis();
   do {
@@ -328,7 +341,8 @@ bool StsServoBus::holdAndVerify(uint8_t id, int32_t hold_counts,
   (void)detail_size;
   return true;
 #else
-  if (!servo.WritePosEx(id, static_cast<int16_t>(hold_counts),
+  if (!writeTorqueLimit(id) ||
+      !servo.WritePosEx(id, static_cast<int16_t>(hold_counts),
                         STS_TEST_SPEED_COUNTS_PER_S, STS_TEST_ACC) ||
       !servo.EnableTorque(id, 1)) {
     snprintf(detail, detail_size, "reason=hold_write_failed");

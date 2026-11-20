@@ -2709,3 +2709,20 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 
 - 再設定は`enableTracking()`の電源投入状態の判定(goal=0かつtorque=0、またはgoal≈raw)に頼る。電源断後に手でドラムを1回転以上回した場合は区別できない(従来どおり)。
 - ジョグ中の電源断から短時間で復帰した場合(読出し欠落が`STS_TEST_MAX_READ_GAP_MS`未満)は、端で止まっても検知しない。
+
+## 2026-11-17: 爪サーボ(ID 2)のトルク制限50%(Issue #13)
+
+- [x] `SERVO_STATUS`に`torque_limit=`/`max_torque=`を追加
+- [x] 実機で読出し: ID 1・ID 2とも`torque_limit=1000 max_torque=1000`
+- [x] ID 2のみtorque ON直前にRAMトルク制限500を書く(`STS_ARM_TORQUE_LIMIT`)。ID 1は1000
+- [x] `verify.sh` PASS(secret-scan、native、Python、m5stack-core2 / sim / hwtestビルド)
+- [x] 書き込み、起動ログ(ID 1/2 ping=OK)、`SERVO_STATUS 1/2`応答
+- [x] チェック: `examples/servo_torque_limit_check.csv`、`docs/servo-torque-limit-check.md`(Codexレビュー P1)。`--dry-run`のみ実施
+- [ ] 実機でID 2を動かした後に`torque_limit=500`となること(ユーザー判断で今回は動かしていない)
+- [ ] サーボ電源再投入 → 次の動作で500へ戻ること
+- [ ] 50%で爪の把持力が足りるか
+
+未解決リスク:
+
+- 電源投入から最初の動作までは100%のまま(その間torqueはOFF)。
+- 50%は暫定値。把持力が足りなければ`STS_ARM_TORQUE_LIMIT`を調整する。

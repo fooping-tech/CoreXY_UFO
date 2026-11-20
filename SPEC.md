@@ -1404,3 +1404,11 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - ジョグ中にサーボの電源が切れた場合は対象外: 位置が読めなくなれば従来どおり`STS_TEST_MAX_READ_GAP_MS`後に`feedback_lost`で止める。
 - `endJog()`でhold指令、`waitJogSettled()`で待つ(全サーボをholdしてから順に待つ。待ちの上限はhold時刻から数える)。サーボが止まるまで(保持点±`STS_TEST_TOLERANCE_COUNTS`かつmoving=0、最大`STS_JOG_SETTLE_TIMEOUT_MS` 600ms)追跡を続ける。サーボは減速で保持点を越えて戻る(800 counts/sで約80 counts、2026-11-08実測)。従来はhold直後に戻っていたので、0.5秒以内に次のJOG/`SERVO_TURN`を始めると、戻り分が待機中のずれ(`idle_drift`)とみなされ追跡が無効になっていた(実機で再現)。この待ちの間motionTaskは次のコマンドを処理しない(`JOG end`行はその後に出る)。
 - 実機構成: Z(ID 1)と爪(ID 2)のサーボ電源は共通。電源断では両方が同時に多回転を失う。
+
+## 2026-11-17: 爪サーボ(ID 2)のトルク制限50%(Issue #13)
+
+- 実測(2026-11-17、電源投入直後): ID 1・ID 2とも`torque_limit=1000 max_torque=1000`(100%)。これまでファームウェアはトルク制限を読みも書きもしていなかった。
+- `SERVO_STATUS`行の末尾に`torque_limit=`(RAM 48-49、いま効いている値)と`max_torque=`(EEPROM 16-17)を追加。単位は0.1%(1000 = 100%)。既存フィールドの並びは不変。
+- ID 2(爪)は`STS_ARM_TORQUE_LIMIT`=500(50%)。ID 1(Z)は荷重を保持するため1000のまま。値は`stsTorqueLimit(id)`(`PlotterConfig.h`)。
+- 書き込みはRAMのみで、torque ONの直前(`holdAndVerify()`と`moveSingleTurn()`)に毎回行う。EEPROMはlockのままで最大トルクは変えない。サーボ電源再投入でRAMは1000へ戻るが、次の`SERVO_TURN`/`SERVO_ANGLE`/JOGの開始時に書き直す。書き込みに失敗したらtorque ONしない(`reason=hold_write_failed`)。
+- 起動時は従来どおり書かない(UART初期化とPINGのみ)。そのため、電源投入から最初の動作までは`SERVO_STATUS`が`torque_limit=1000`を返す。
