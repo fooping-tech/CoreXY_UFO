@@ -1422,12 +1422,15 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
   - `OK`(0)、`MOVE_TIMED_EMPTY`(8): 登録済み。
   - `DirPin2msPauseAdded`(5)、`DirChangePauseInjected`(6): 方向切替の待機だけが積まれ、**移動は未登録**。待機のtickを記録して同じ移動をすぐ送り直す(1回の投入で最大4回)。従来は5を「登録済み」と扱っていた。現在の配線(DIRピン直結)で返るのは6で、6は従来も再試行していたので、この点は現在の実機の症状の原因ではない。
   - その他の正の値: 再試行。負の値: エラー。
-- A/Bの時間差の補正: 方向切替の待機と`moveTimed()`のtickの丸めで、A/Bに積んだ時間に差が出る。差が`MIN_CMD_TICKS`(3200 ticks = 200us)以上になったら、短い側に同じ長さの待機を積む。従来は`actual_*_ticks`を取るだけで使っていなかった。
+- A/Bの時間差の補正: 方向切替の待機と`moveTimed()`のtickの丸め(速い側は1セグメントで数百ticks短くなる)で、A/Bに積んだ時間に差が出る。差は、短い側の次のセグメントの時間に足して消す(1セグメントあたり最大でその時間の1/8)。足した分はそのセグメントのステップ間隔に均等に広がる。待機を別に積む方式は採らない(最高速で回っているモーターに200usの停止が入るため。セルフレビューで判明)。従来は`actual_*_ticks`を取るだけで使っておらず、差は移動の終わりまで残っていた(1.2秒の移動で約1ms)。
 - `MOVE_TIMED_EMPTY`を、開始前(最初のセグメント)と実行中で区別する。実行中に出たら、その軸のキューが空になった(underrun)。到達ステップ数は正しいが途中の経路は計画どおりではないので、移動の完了時に`WARN: timed segment queue ran dry during the move`と`TIMED_SEGMENT_STATS`を出す。アラームにはしない。
 - A/B両方のキューにセグメント全体が入ることを確かめてからAを積む(従来どおり)。必要エントリ数の見積もりは、`moveTimed()`が実際に使う数を下回らないようにした(1 stepあたりの待機の分割で1つ多く使う場合があった)。
 - Aを積んだ後にBが断られ続けた場合、1000msで停止する(`TIMED_SEGMENT_PARTIAL_RETRY_TIMEOUT_MS`、従来どおり)。原因が分からないまま延ばしていない。
-- `startTimedSegments()`: キューが実際に動き出したかを確かめる。動かなければ20ms(`TIMED_SEGMENT_START_TIMEOUT_MS`)まで再試行し、それでも動かなければアラーム。従来は`moveTimed(0, 0, nullptr, true)`の戻り値(失敗しても`OK`)だけを見ていた。
-- 失敗時の診断: アラームの行に続けて`TIMED_SEGMENT_FAIL stage=.. segment=.. start=.. raw_a=.. raw_b=.. a_steps=.. b_steps=.. ticks=.. entries_a=.. entries_b=.. running_a=.. running_b=.. waited_ms=.. b_retries=.. pause_ticks_a=.. pause_ticks_b=.. skew_ticks=..`と`TIMED_SEGMENT_STATS segments=.. underruns_a=.. underruns_b=.. pauses_a=.. pauses_b=.. pad_ticks_a=.. pad_ticks_b=.. b_retries=.. max_b_wait_ms=.. skew_ticks=..`を出す。投入中は出力せず、停止後に出す。フィールドの意味は`tools/serial_tool/docs/timed-segment-diagonal-check.md`。
+- キューに空きがなく、どちらのキューのエントリ数も1000ms変わらない場合は、キューが消化されていないとみなして停止する(`stage=capacity_stall`)。1エントリは最長4.1msなので、正常ならこの間に必ず減る。従来は、この状態ではアラームも出さずに再試行を続けていた。
+- セグメントの時間は134秒(2^31 ticks)まで。超えるものは投入前に断る(`AB_TIMED`には上限がなく、tickの計算があふれていた)。
+- `startTimedSegments()`: キューが実際に動き出したかを確かめる。動かなければ20ms(`TIMED_SEGMENT_START_TIMEOUT_MS`)まで再試行し、それでも動かなければアラーム(`stage=start`)。従来は`moveTimed(0, 0, nullptr, true)`の戻り値(失敗しても`OK`)だけを見ていた。
+- 失敗時の診断: アラームの行に続けて3行を出す。`TIMED_SEGMENT_FAIL stage=.. segment=.. start=.. raw_a=.. raw_b=.. first_raw_b=.. a_steps=.. b_steps=.. ticks=.. waited_ms=.. b_retries=..`、`TIMED_SEGMENT_QUEUES entries_a=.. entries_b=.. running_a=.. running_b=.. suspended_a=.. suspended_b=.. pause_ticks_a=.. pause_ticks_b=.. skew_ticks=..`、`TIMED_SEGMENT_STATS segments=.. underruns_a=.. underruns_b=.. pauses_a=.. pauses_b=.. stretch_ticks_a=.. stretch_ticks_b=.. max_stretch_ticks=.. b_retries=.. max_b_wait_ms=.. skew_ticks=..`。投入中は出力せず、停止後に出す。フィールドの意味は`tools/serial_tool/docs/timed-segment-diagonal-check.md`。
 - `platformio.ini`: `gin66/FastAccelStepper@2.0.0`に固定(従来は版の指定なし)。ローカルの`.pio/libdeps`は2026-10-07から2.0.0で、実機はこのビルドで書き込んでいる。戻り値の数値は`static_assert`でライブラリと照合する。
 - 機械的な脱調は別の問題として扱う。この変更は脱調の対策ではない。
+- 既知の制約(この変更の対象外、コードを読んで判明、実機未確認): `StepperBackendFastAccel::stop()`が呼ぶFastAccelStepper 2.0.0の`forceStop()`は、コマンド受付を止めるラッチを立ててramp generatorを止めるだけで、キューに積み済みのエントリは消さない。timed segmentはramp generatorを使わないので、`stop()`の後も積み済みの分(Bが低速のときは約0.1秒分、両軸が1セグメント1エントリのときは最大約0.6秒分)は動き続ける。リミット、アラーム、ABORT、キューエラーの停止がこれに当たる。別Issueで扱う。
 

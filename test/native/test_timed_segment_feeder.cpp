@@ -32,6 +32,7 @@ constexpr int8_t kDirPin2msPauseAdded = 5;
 constexpr int8_t kDirChangePauseInjected = 6;
 constexpr int8_t kMoveBusy = 7;
 constexpr int8_t kMoveEmpty = 8;
+constexpr int8_t kTicksTooLow = -1;
 constexpr int8_t kTooLarge = -4;
 
 void require(bool condition, const char* message) {
@@ -58,7 +59,7 @@ class FakeAxis {
     }
     const int8_t ret_ok = queue_.empty() ? kMoveEmpty : kOk;
     if (steps == 0 && duration == 0) {
-      if (start && !queue_.empty()) running_ = true;
+      if (start && !queue_.empty() && !not_ready_) running_ = true;
       return ret_ok;
     }
     if (not_ready_) return kDeviceNotReady;
@@ -132,9 +133,11 @@ class FakeAxis {
 
   uint16_t queueEntries() const { return static_cast<uint16_t>(queue_.size()); }
   bool isRunning() const { return running_; }
+  bool isSuspended() const { return false; }
 
   // Plays the queue for elapsed ticks. An empty queue stops.
   void advance(uint32_t elapsed) {
+    if (stalled_) return;
     while (running_ && elapsed > 0) {
       if (queue_.empty()) {
         running_ = false;
@@ -159,6 +162,8 @@ class FakeAxis {
   }
 
   void setNotReady(bool not_ready) { not_ready_ = not_ready; }
+  // The driver stopped playing entries although the queue counts as running.
+  void setStalled(bool stalled) { stalled_ = stalled; }
   void forceResult(int8_t result, uint32_t times) {
     forced_result_ = result;
     forced_results_left_ = times;
@@ -171,6 +176,7 @@ class FakeAxis {
   uint32_t calls() const { return calls_; }
   uint16_t maxEntries() const { return max_entries_; }
   uint32_t entriesUsed() const { return entries_used_; }
+  uint32_t pauseEntries() const { return pause_entries_; }
 
  private:
   // FastAccelStepper::addQueueEntry() with a direction pin on the ESP32
@@ -191,6 +197,10 @@ class FakeAxis {
         return kDirChangePauseInjected;
       }
     }
+    // StepperQueue::addQueueEntry(): a command shorter than MIN_CMD_TICKS.
+    if ((entry.steps > 1 ? entry.ticks * entry.steps : entry.ticks) < kMinCmdTicks) {
+      return kTicksTooLow;
+    }
     push(entry, start);
     if (actual != nullptr) {
       *actual += entry.steps > 1 ? entry.ticks * entry.steps : entry.ticks;
@@ -206,6 +216,7 @@ class FakeAxis {
     queued_position_ += entry.count_up ? entry.steps : -static_cast<int32_t>(entry.steps);
     queued_ticks_ += entry.steps > 1 ? entry.ticks * entry.steps : entry.ticks;
     ++entries_used_;
+    if (entry.steps == 0) ++pause_entries_;
     if (queue_.size() > max_entries_) max_entries_ = static_cast<uint16_t>(queue_.size());
     if (entry.steps > 0 || direction_changed) {
       last_pause_ticks_ = 0;
@@ -218,6 +229,8 @@ class FakeAxis {
   std::deque<Entry> queue_;
   bool running_ = false;
   bool not_ready_ = false;
+  bool stalled_ = false;
+  uint32_t pause_entries_ = 0;
   bool queue_end_count_up_ = true;
   uint32_t last_pause_ticks_ = 0;
   uint32_t head_played_ticks_ = 0;
@@ -248,7 +261,6 @@ timed_segment::Config testConfig() {
   timed_segment::Config config;
   config.queue_len = kQueueLen;
   config.direction_entry_margin = 2;
-  config.min_pause_ticks = kMinCmdTicks;
   config.partial_retry_timeout_ms = 1000;
   config.max_pause_injections = 4;
   return config;
@@ -360,6 +372,18 @@ void testEstimateCoversModelEntries() {
               "estimateEntries depends on the sign");
     }
   }
+  // Ticks per step around the points where the library splits a pause in two.
+  for (const uint32_t rate : {65535U, 65536U, 131070U, 131071U, 131072U, 196606U,
+                              196607U, 196608U, 262143U, 262144U}) {
+    for (int32_t steps = 1; steps <= 4; ++steps) {
+      FakeAxis axis;
+      const int8_t result =
+          axis.moveTimed(static_cast<int16_t>(steps), rate * steps, nullptr, false);
+      require(result == kMoveEmpty, "model refused a boundary move");
+      require(timed_segment::estimateEntries(steps, rate * steps) >= axis.entriesUsed(),
+              "estimateEntries is below the entries used at a split boundary");
+    }
+  }
   // 20 ms with 0..4 steps is the slow axis of a near-45-degree move.
   const uint32_t segment_ticks = 20000 * kTicksPerUs;
   require(timed_segment::estimateEntries(0, segment_ticks) == 5, "0 steps: 5 pauses");
@@ -413,6 +437,17 @@ void testNear45DegreeMovesComplete() {
     require(stats.underruns_a == 0 && stats.underruns_b == 0,
             "a queue ran dry during the move");
     require(stats.max_b_wait_ms == 0, "B was refused after A was queued");
+    // The skew is removed by lengthening segments a little. It must never
+    // become a pause on a motor that is stepping.
+    // Tick rounding alone is far below one pause; a direction change adds its
+    // two pauses (2 % of a 20 ms segment) to the other axis once.
+    const bool reverses = move.a_steps < 0 || move.b_steps < 0;
+    require(stats.max_stretch_ticks <
+                (reverses ? 3 * kMinCmdTicks : kMinCmdTicks),
+            "a segment was lengthened by a visible amount");
+    if (move.a_steps > 5000 && move.b_steps >= 0 && move.b_steps <= 600) {
+      require(a.pauseEntries() == 0, "the fast motor got a zero-step pause");
+    }
     const int64_t skew = static_cast<int64_t>(a.queuedTicks()) -
                          static_cast<int64_t>(b.queuedTicks());
     require(skew == stats.skew_ticks, "skew accounting does not match the queues");
@@ -524,6 +559,7 @@ void testStuckBTimesOutWithSnapshot() {
   require(failure.stage == timed_segment::Stage::B_TIMEOUT, "wrong stage");
   require(failure.raw_a == kOk, "raw A result not kept");
   require(failure.raw_b == kDeviceNotReady, "raw B result not kept");
+  require(failure.first_raw_b == kDeviceNotReady, "first raw B result not kept");
   require(failure.a_steps == 120 && failure.b_steps == 1, "segment not kept");
   require(failure.duration_ticks == ticks, "ticks not kept");
   require(failure.segment_index == 2, "segment index not kept");
@@ -545,6 +581,9 @@ void testErrorsAreReportedWithStage() {
   require(feeder.feed(a, b, clock, 10, 0, 0, false) ==
               timed_segment::FeedResult::ERROR,
           "zero duration accepted");
+  require(feeder.feed(a, b, clock, 10, 0, 0x80000000U, false) ==
+              timed_segment::FeedResult::ERROR,
+          "a duration beyond the tick range was accepted");
   // 30 steps in 2 s: more queue entries than one move may use.
   require(feeder.feed(a, b, clock, 30, 0, 2 * kTicksPerS, false) ==
               timed_segment::FeedResult::ERROR,
@@ -595,6 +634,70 @@ void testFullQueueQueuesNothing() {
   require(queued >= 3, "fewer than three slow segments fit");
 }
 
+// B's queue stops being played while it still counts as running: there is
+// never room for the next segment. That used to retry forever in silence.
+void testStalledQueueIsReported() {
+  FakeAxis a;
+  FakeAxis b;
+  FakeClock clock{&a, &b};
+  timed_segment::Feeder feeder(testConfig());
+  const uint32_t ticks = 20000 * kTicksPerUs;
+  require(feeder.feed(a, b, clock, 200, 1, ticks, false) ==
+              timed_segment::FeedResult::QUEUED,
+          "first segment");
+  a.moveTimed(0, 0, nullptr, true);
+  b.moveTimed(0, 0, nullptr, true);
+  b.setStalled(true);
+  uint32_t queued = 1;
+  timed_segment::FeedResult result = timed_segment::FeedResult::RETRY;
+  const uint32_t started_ms = clock.now_ms;
+  for (;;) {
+    result = feeder.feed(a, b, clock, 200, 1, ticks, true);
+    if (result == timed_segment::FeedResult::ERROR) break;
+    if (result == timed_segment::FeedResult::QUEUED) {
+      ++queued;
+    } else {
+      clock.waitMs();
+    }
+    require(clock.now_ms - started_ms < 5000, "a stalled queue was never reported");
+  }
+  const timed_segment::Failure& failure = feeder.failure();
+  require(failure.stage == timed_segment::Stage::CAPACITY_STALL, "wrong stage");
+  require(failure.waited_ms >= 1000, "reported before the timeout");
+  require(failure.running_b, "running state not kept");
+  require(failure.entries_b > 20, "entry count not kept");
+  require(b.queuedPosition() == static_cast<int32_t>(queued), "segment count wrong");
+
+  // A queue that drains slowly is not a stall: waiting for room is normal.
+  FakeAxis a2;
+  FakeAxis b2;
+  FakeClock clock2{&a2, &b2};
+  timed_segment::Feeder feeder2(testConfig());
+  const MotionBlock block = planBlock(600, 0, 60.0f);
+  require(runMove(feeder2, a2, b2, clock2, block).ok,
+          "a slow move was reported as a stall");
+}
+
+// The backend filled the queues and they did not start.
+void testStartFailureIsRecorded() {
+  FakeAxis a;
+  FakeAxis b;
+  FakeClock clock{&a, &b};
+  timed_segment::Feeder feeder(testConfig());
+  require(feeder.feed(a, b, clock, 200, 0, 20000 * kTicksPerUs, false) ==
+              timed_segment::FeedResult::QUEUED,
+          "first segment");
+  require(!feeder.failure().valid, "failure before the start");
+  b.setNotReady(true);
+  a.moveTimed(0, 0, nullptr, true);
+  b.moveTimed(0, 0, nullptr, true);
+  feeder.recordStartFailure(a, b);
+  const timed_segment::Failure& failure = feeder.failure();
+  require(failure.valid && failure.stage == timed_segment::Stage::START, "stage");
+  require(failure.running_a && !failure.running_b, "which axis did not start");
+  require(failure.entries_b == 5, "entry count of the axis that did not start");
+}
+
 // An axis that ran dry while the run was going is counted, not hidden.
 void testUnderrunIsCounted() {
   FakeAxis a;
@@ -629,6 +732,8 @@ int main() {
   testStuckBTimesOutWithSnapshot();
   testErrorsAreReportedWithStage();
   testFullQueueQueuesNothing();
+  testStalledQueueIsReported();
+  testStartFailureIsRecorded();
   testUnderrunIsCounted();
   std::cout << "native timed segment feeder tests passed\n";
   return 0;

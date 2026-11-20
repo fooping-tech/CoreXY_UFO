@@ -32,7 +32,6 @@ timed_segment::Config timedSegmentConfig() {
   timed_segment::Config config;
   config.queue_len = QUEUE_LEN;
   config.direction_entry_margin = TIMED_SEGMENT_DIRECTION_ENTRY_MARGIN;
-  config.min_pause_ticks = MIN_CMD_TICKS;
   config.partial_retry_timeout_ms = TIMED_SEGMENT_PARTIAL_RETRY_TIMEOUT_MS;
   config.max_pause_injections = TIMED_SEGMENT_MAX_PAUSE_INJECTIONS;
   return config;
@@ -49,6 +48,7 @@ struct FasTimedAxis {
   // The driver state. FastAccelStepper::isRunning() is also true while
   // entries wait in a queue that has not been started.
   bool isRunning() const { return motor->isQueueRunning(); }
+  bool isSuspended() const { return motor->areCommandsSuspended(); }
 };
 
 struct RtosRetryClock {
@@ -175,12 +175,14 @@ StepperBackend::TimedSegmentResult StepperBackendFastAccel::queueTimedSegment(
   if (motor_a_ == nullptr || motor_b_ == nullptr) {
     return TimedSegmentResult::ERROR;
   }
-  // duration_us comes from ~20 ms segments; reject what would overflow ticks.
-  if (segment.duration_us > UINT32_MAX / (TICKS_PER_S / 1000000UL)) {
-    return TimedSegmentResult::ERROR;
-  }
+  // Real segments are about 20 ms. Longer than the feeder accepts (also what
+  // would overflow the tick count) goes in as 0 and is refused there, so that
+  // the refusal is recorded like any other.
   const uint32_t duration_ticks =
-      segment.duration_us * (TICKS_PER_S / 1000000UL);
+      segment.duration_us >
+              timed_segment::MAX_DURATION_TICKS / (TICKS_PER_S / 1000000UL)
+          ? 0
+          : segment.duration_us * (TICKS_PER_S / 1000000UL);
   FasTimedAxis axis_a{motor_a_};
   FasTimedAxis axis_b{motor_b_};
   RtosRetryClock clock;
@@ -212,7 +214,12 @@ bool StepperBackendFastAccel::startTimedSegments() {
     const bool started_a = motor_a_->isQueueRunning() || motor_a_->queueEntries() == 0;
     const bool started_b = motor_b_->isQueueRunning() || motor_b_->queueEntries() == 0;
     if (started_a && started_b) return true;
-    if (millis() - start_ms >= TIMED_SEGMENT_START_TIMEOUT_MS) return false;
+    if (millis() - start_ms >= TIMED_SEGMENT_START_TIMEOUT_MS) {
+      const FasTimedAxis axis_a{motor_a_};
+      const FasTimedAxis axis_b{motor_b_};
+      timed_segment_feeder_.recordStartFailure(axis_a, axis_b);
+      return false;
+    }
     vTaskDelay(pdMS_TO_TICKS(1));
   }
 #endif

@@ -10,23 +10,26 @@ CoreXY では、ほぼ 45° の移動で片方のモーター(A = X+Y、B = X-Y)
 
 ## 見るログ
 
-失敗したとき、アラームの行に続けて次の 2 行が出る。**この 2 行を Issue #15 に貼る。**
+失敗したとき、アラームの行に続けて次の 3 行が出る。**この 3 行を Issue #15 に貼る。**
 
 ```
-TIMED_SEGMENT_FAIL stage=b_timeout segment=3 start=1 raw_a=0 raw_b=4 a_steps=120 b_steps=1 ticks=320000 entries_a=6 entries_b=0 running_a=1 running_b=0 waited_ms=1000 b_retries=1000 pause_ticks_a=0 pause_ticks_b=0 skew_ticks=0
-TIMED_SEGMENT_STATS segments=3 underruns_a=0 underruns_b=0 pauses_a=0 pauses_b=0 pad_ticks_a=0 pad_ticks_b=0 b_retries=0 max_b_wait_ms=0 skew_ticks=0
+TIMED_SEGMENT_FAIL stage=b_timeout segment=3 start=1 raw_a=0 raw_b=4 first_raw_b=4 a_steps=120 b_steps=1 ticks=320000 waited_ms=1000 b_retries=1000
+TIMED_SEGMENT_QUEUES entries_a=6 entries_b=0 running_a=1 running_b=0 suspended_a=0 suspended_b=0 pause_ticks_a=0 pause_ticks_b=0 skew_ticks=0
+TIMED_SEGMENT_STATS segments=3 underruns_a=0 underruns_b=0 pauses_a=0 pauses_b=0 stretch_ticks_a=0 stretch_ticks_b=0 max_stretch_ticks=0 b_retries=0 max_b_wait_ms=0 skew_ticks=0
 ```
 
 | フィールド | 意味 |
 |---|---|
-| `stage` | `b_timeout`: A を積んだ後、B が 1000 ms 断り続けた。`a_append`/`b_append`: `moveTimed()` がエラーを返した。`too_large`/`invalid_segment`: 投入前に断った |
-| `raw_a` / `raw_b` | FastAccelStepper `moveTimed()` の最後の戻り値。0 OK、1 QueueFull、2 DirPinIsBusy、4 DeviceNotReady、5/6 方向切替の待機を挿入(移動は未登録)、7 Busy、8 Empty、-4 TooLarge、-5 CommandsSuspended |
+| `stage` | `b_timeout`: A を積んだ後、B が 1000 ms 断り続けた。`capacity_stall`: キューに空きがなく、1000 ms の間どのエントリも消化されなかった。`start`: 積んだキューが動き出さなかった。`a_append`/`b_append`: `moveTimed()` がエラーを返した。`too_large`/`invalid_segment`: 投入前に断った |
+| `raw_a` / `raw_b` / `first_raw_b` | FastAccelStepper `moveTimed()` の最後の戻り値と、B が最初に断ったときの戻り値。0 OK、1 QueueFull、2 DirPinIsBusy、4 DeviceNotReady、5/6 方向切替の待機を挿入(移動は未登録)、7 Busy、8 Empty、-4 TooLarge、-5 CommandsSuspended |
 | `segment` | その移動で何個目のセグメントか(0 始まり) |
 | `entries_a` / `entries_b` | 失敗時のキューのエントリ数(最大 32) |
 | `running_a` / `running_b` | 失敗時にキューが動いていたか |
+| `suspended_a` / `suspended_b` | コマンド受付が止められていたか(`forceStop()` の後のラッチ) |
 | `waited_ms` / `b_retries` | B を待った時間と再試行の回数 |
 | `pause_ticks_*` | この投入で挿入された方向切替の待機 [ticks、16 MHz] |
 | `skew_ticks` | A に積んだ時間 − B に積んだ時間 |
+| `stretch_ticks_*` / `max_stretch_ticks` | 時間差を消すためにセグメントの時間へ足した合計と、1 セグメントでの最大 |
 
 移動は完了したが途中でキューが空になった場合は、`WARN: timed segment queue ran dry during the move` と `TIMED_SEGMENT_STATS` が出る(`underruns_a`/`underruns_b` が 1 以上)。到達位置は正しいが、途中の経路は計画した直線からずれている。
 
@@ -58,7 +61,7 @@ python tools/serial_tool/serial_send.py \
 
 - ログに `TIMED_SEGMENT_FAIL` と `WARN: timed segment queue ran dry` が出ない。
 - 最後の `POS` が `HOMED=YES`。
-- 失敗した場合は、上の 2 行と、その移動の `XY` 行を記録する。`ALARM_CLEAR` → `HOME` で復帰する。
+- 失敗した場合は、上の 3 行と、その移動の `XY` 行を記録する。`ALARM_CLEAR` → `HOME` で復帰する。
 
 ## 実機結果
 

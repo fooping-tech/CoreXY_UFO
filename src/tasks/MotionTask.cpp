@@ -308,37 +308,42 @@ bool waitForMotionOrLimit() {
 void logTimedSegmentStats() {
   const timed_segment::RunStats& stats = stepper_backend.timedSegmentStats();
   logMessage("TIMED_SEGMENT_STATS segments=%lu underruns_a=%lu underruns_b=%lu "
-             "pauses_a=%lu pauses_b=%lu pad_ticks_a=%lu pad_ticks_b=%lu "
-             "b_retries=%lu max_b_wait_ms=%lu skew_ticks=%ld",
+             "pauses_a=%lu pauses_b=%lu stretch_ticks_a=%lu stretch_ticks_b=%lu "
+             "max_stretch_ticks=%lu b_retries=%lu max_b_wait_ms=%lu skew_ticks=%ld",
              static_cast<unsigned long>(stats.segments),
              static_cast<unsigned long>(stats.underruns_a),
              static_cast<unsigned long>(stats.underruns_b),
              static_cast<unsigned long>(stats.pause_injections_a),
              static_cast<unsigned long>(stats.pause_injections_b),
-             static_cast<unsigned long>(stats.pad_ticks_a),
-             static_cast<unsigned long>(stats.pad_ticks_b),
+             static_cast<unsigned long>(stats.stretch_ticks_a),
+             static_cast<unsigned long>(stats.stretch_ticks_b),
+             static_cast<unsigned long>(stats.max_stretch_ticks),
              static_cast<unsigned long>(stats.b_retries),
              static_cast<unsigned long>(stats.max_b_wait_ms),
              static_cast<long>(stats.skew_ticks));
 }
 
-// One line with the state at the moment the backend refused a segment, and one
-// with the counters of the run. Called after the motors were stopped.
+// What the backend recorded when it refused a segment, and the counters of
+// the run. Nothing is printed while segments are being queued. stop() only
+// stops new commands: entries already queued may still be playing here.
 void logTimedSegmentDiagnostics() {
   const timed_segment::Failure& failure = stepper_backend.lastTimedSegmentFailure();
   if (failure.valid) {
     logMessage("TIMED_SEGMENT_FAIL stage=%s segment=%lu start=%u raw_a=%d raw_b=%d "
-               "a_steps=%ld b_steps=%ld ticks=%lu entries_a=%u entries_b=%u "
-               "running_a=%u running_b=%u waited_ms=%lu b_retries=%lu "
-               "pause_ticks_a=%lu pause_ticks_b=%lu skew_ticks=%ld",
+               "first_raw_b=%d a_steps=%ld b_steps=%ld ticks=%lu waited_ms=%lu "
+               "b_retries=%lu",
                timed_segment::stageName(failure.stage),
                static_cast<unsigned long>(failure.segment_index), failure.start,
-               failure.raw_a, failure.raw_b, static_cast<long>(failure.a_steps),
-               static_cast<long>(failure.b_steps),
-               static_cast<unsigned long>(failure.duration_ticks), failure.entries_a,
-               failure.entries_b, failure.running_a, failure.running_b,
+               failure.raw_a, failure.raw_b, failure.first_raw_b,
+               static_cast<long>(failure.a_steps), static_cast<long>(failure.b_steps),
+               static_cast<unsigned long>(failure.duration_ticks),
                static_cast<unsigned long>(failure.waited_ms),
-               static_cast<unsigned long>(failure.b_retries),
+               static_cast<unsigned long>(failure.b_retries));
+    logMessage("TIMED_SEGMENT_QUEUES entries_a=%u entries_b=%u running_a=%u "
+               "running_b=%u suspended_a=%u suspended_b=%u pause_ticks_a=%lu "
+               "pause_ticks_b=%lu skew_ticks=%ld",
+               failure.entries_a, failure.entries_b, failure.running_a,
+               failure.running_b, failure.suspended_a, failure.suspended_b,
                static_cast<unsigned long>(failure.pause_ticks_a),
                static_cast<unsigned long>(failure.pause_ticks_b),
                static_cast<long>(failure.skew_ticks));
