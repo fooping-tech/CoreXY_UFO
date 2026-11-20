@@ -79,6 +79,11 @@
     element.querySelector(".limit-raw").textContent = `raw ${raw || "?"}`;
   }
 
+  // Per-command SERVO_TURN limit of the firmware (stsMaxTurns): ID 1 (Z drum) 6, others 3.
+  function maxServoTurns(id) {
+    return Number(id) === 1 ? 6 : 3;
+  }
+
   function servoPanelHtml(servo) {
     const id = servo.id;
     return `
@@ -104,8 +109,8 @@
           <button class="test-servo" data-servo-action="turn" data-turns="1" type="button">+1 turn</button>
         </div>
         <div class="servo-row">
-          <label>Turns (+ = clockwise, max ±3)
-            <input id="servoTurns${id}" type="number" min="-3" max="3" step="0.25" value="3">
+          <label>Turns (+ = clockwise, max ±${maxServoTurns(id)})
+            <input id="servoTurns${id}" type="number" min="-${maxServoTurns(id)}" max="${maxServoTurns(id)}" step="0.25" value="3">
           </label>
           <button class="warning test-servo" data-servo-action="turnCustom" type="button">ROTATE</button>
           <button class="danger" data-servo-action="off" type="button">TORQUE OFF</button>
@@ -131,7 +136,8 @@
       return `SERVO_ANGLE ${id} ${angle.toFixed(1)}`;
     }
     const turns = action === "turn" ? Number(button.dataset.turns) : Number($(`servoTurns${id}`).value);
-    if (!Number.isFinite(turns) || turns === 0 || Math.abs(turns) > 3) throw new Error("Turns must be non-zero and within ±3");
+    const maxTurns = maxServoTurns(id);
+    if (!Number.isFinite(turns) || turns === 0 || Math.abs(turns) > maxTurns) throw new Error(`Turns must be non-zero and within ±${maxTurns}`);
     return `SERVO_TURN ${id} ${turns.toFixed(2)}`;
   }
 

@@ -374,7 +374,7 @@ StsMoveResult StsServoBus::moveRelative(uint8_t id, int32_t delta_counts,
     return StsMoveResult::REJECTED;
   }
   const int32_t max_delta_counts =
-      static_cast<int32_t>(STS_TEST_MAX_TURNS * STS_COUNTS_PER_TURN);
+      static_cast<int32_t>(stsMaxTurns(id) * STS_COUNTS_PER_TURN);
   if (delta_counts == 0 || labs(delta_counts) > max_delta_counts) {
     snprintf(detail, detail_size, "reason=delta_out_of_range max=%ld",
              static_cast<long>(max_delta_counts));

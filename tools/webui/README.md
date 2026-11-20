@@ -213,7 +213,7 @@ auto motion timeoutを変更できます。保存した値は以後のmanual com
 - `ENTER TEST MODE`で通常ファームウェアの`TEST_MODE ON`を送る
 - リミットX/Y(debounced/raw)を`POS`の定期取得(1.5秒)で表示
 - モータA/B単独、X/Y方向の相対移動(`TEST_JOG`、最大50mm、リミットONで停止)
-- シリアルサーボID 1(Z軸ドラム)/ID 2(アーム)の角度指定、±3回転までの回転、torque OFF
+- シリアルサーボID 1(Z軸ドラム)/ID 2(アーム)の角度指定、回転(ID 1は±6回転、ID 2は±3回転まで)、torque OFF
 - `STOP`は実行中のテストコマンドを止めて`ABORT`を送る
 
 サーバーは`/api/test/command`で許可したコマンドだけを送り、各コマンドの`result=`行まで待つ。
