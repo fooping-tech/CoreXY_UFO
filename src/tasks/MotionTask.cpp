@@ -1251,8 +1251,9 @@ void handleServoMove(const CommandMessage& command) {
     result = sts_servo_bus.moveToAngle(command.servo_id, command.servo_value,
                                        isMotionAbortRequested, detail, sizeof(detail));
     setMotionActive(false);
-  } else if (fabsf(command.servo_value) > STS_TEST_MAX_TURNS) {
-    snprintf(detail, sizeof(detail), "reason=turns_over max=%.1f", STS_TEST_MAX_TURNS);
+  } else if (fabsf(command.servo_value) > stsMaxTurns(command.servo_id)) {
+    snprintf(detail, sizeof(detail), "reason=turns_over max=%.1f",
+             stsMaxTurns(command.servo_id));
   } else {
     const int32_t delta_counts =
         static_cast<int32_t>(lroundf(command.servo_value * STS_COUNTS_PER_TURN));

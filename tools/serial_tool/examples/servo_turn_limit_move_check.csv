@@ -1,0 +1,8 @@
+command,delay_ms,expect,comment
+TEST_MODE ON,500,TEST_MODE result=ON,Enter test mode
+SERVO_STATUS 1,500,SERVO_STATUS id=1 result=OK,Read abs= before the move: abs + 14746 must stay within +/-28000
+SERVO_TURN 1 3.6,14000,SERVO_TURN id=1 value=3.60 result=PASS,Z DRUM MOVES 3.6 turns DOWN in one command (about 6.7 s). Start from the TOP position with the path clear
+SERVO_STATUS 1,500,SERVO_STATUS id=1 result=OK,abs= is the start value + 14746 (+/-5)
+SERVO_TURN 1 -3.6,14000,SERVO_TURN id=1 value=-3.60 result=PASS,Z drum back up in one command
+SERVO_STATUS 1,500,SERVO_STATUS id=1 result=OK,abs= is back at the start value (+/-5)
+TEST_MODE OFF,500,TEST_MODE result=OFF,Leave test mode

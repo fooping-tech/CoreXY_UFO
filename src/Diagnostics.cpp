@@ -43,6 +43,9 @@ void Diagnostics::printConfig() {
              PEN_SERVO_POSITION_TOLERANCE,
              static_cast<unsigned long>(PEN_SERVO_MOVE_TIMEOUT_MS),
              PEN_SERVO_SPEED, PEN_SERVO_ACCELERATION);
+  logMessage("SERVO_TURN max_turns id1=%.1f id2=%.1f abs_limit_counts=%ld speed=%u",
+             stsMaxTurns(1), stsMaxTurns(2),
+             static_cast<long>(STS_TEST_ABS_LIMIT_COUNTS), STS_TEST_SPEED_COUNTS_PER_S);
   logMessage("MOTION steps_per_mm=%.3f default_feed=%.3f max_feed=%.3f accel=%.3f soft_limit X=[%.3f,%.3f] Y=[%.3f,%.3f]",
              STEPS_PER_MM, DEFAULT_FEED_MM_MIN, MAX_FEED_MM_MIN,
              DEFAULT_ACCEL_MM_S2, X_MIN_MM, X_MAX_MM, Y_MIN_MM, Y_MAX_MM);
