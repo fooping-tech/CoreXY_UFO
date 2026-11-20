@@ -2,6 +2,7 @@
 
 #include "StepperBackend.h"
 #include "SegmentGenerator.h"
+#include "TimedSegmentFeeder.h"
 
 class FastAccelStepper;
 
@@ -16,6 +17,10 @@ class StepperBackendFastAccel : public StepperBackend {
   TimedSegmentResult queueTimedSegment(const MotionSegment& segment,
                                        bool start);
   bool startTimedSegments();
+  // Why the last queueTimedSegment() ERROR happened (valid=false: none yet).
+  const timed_segment::Failure& lastTimedSegmentFailure() const;
+  // Counters since the A/B queues were last idle.
+  const timed_segment::RunStats& timedSegmentStats() const;
   bool beginDiagnosticTone() override;
   DiagnosticPulseResult queueDiagnosticPulse(uint32_t frequency_hz) override;
   void endDiagnosticTone() override;
@@ -42,13 +47,9 @@ class StepperBackendFastAccel : public StepperBackend {
 
  private:
   void configureSpeed(float feed_mm_min);
-  TimedSegmentResult mapMoveTimedResult(int8_t result) const;
-  uint16_t estimateMoveTimedEntries(int32_t steps,
-                                    uint32_t duration_ticks) const;
-  bool hasTimedSegmentCapacity(const MotionSegment& segment,
-                               uint32_t duration_ticks) const;
   FastAccelStepper* motor_a_ = nullptr;
   FastAccelStepper* motor_b_ = nullptr;
+  timed_segment::Feeder timed_segment_feeder_;
   bool ready_ = false;
   bool diagnostic_direction_positive_ = true;
   bool diagnostic_direction_positive_b_ = true;

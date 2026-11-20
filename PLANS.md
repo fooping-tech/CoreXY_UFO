@@ -2726,3 +2726,33 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 
 - 電源投入から最初の動作までは100%のまま(その間torqueはOFF)。
 - 50%は暫定値。把持力が足りなければ`STS_ARM_TORQUE_LIMIT`を調整する。
+
+## 2026-11-20: 45°付近のXY移動でのtimed segmentキューエラー(Issue #15)
+
+- [x] 静的調査: FastAccelStepper 2.0.0の`moveTimed()`、`addQueueEntry()`、方向切替の待機、ESP32 MCPWM/PCNTドライバを読んだ。Bが1000ms断られ続ける戻り値は特定できなかった
+- [x] `TimedSegmentFeeder.h`: 待機挿入(5/6)は未登録として送り直し、A/Bの時間差を次のセグメントの時間で補正、underrunを数える、失敗時のスナップショット
+- [x] セルフレビュー対応: 時間差の補正を待機の追加からセグメント時間の延長へ(最高速のモーターに200usの停止が入っていた)、起動失敗時のスナップショット(`stage=start`)、キューが消化されない場合の停止(`stage=capacity_stall`)、`first_raw_b`と`suspended_*`、134秒を超えるセグメントの拒否
+- [x] `TIMED_SEGMENT_FAIL` / `TIMED_SEGMENT_QUEUES` / `TIMED_SEGMENT_STATS`の診断行
+- [x] `startTimedSegments()`で実際の起動を確認
+- [x] FastAccelStepperを2.0.0に固定
+- [x] nativeテスト`test_timed_segment_feeder.cpp`: Issueの2例、B=0、A=0、B/A 0.018 / 0.046 / 0.052 / 0.1、純X / 純Y、方向反転、Bの一時的な拒否、Bが詰まった場合の1000ms停止とスナップショット、キュー満杯、キューが消化されない場合、起動失敗、underrun、速い側のモーターに待機が入らないこと
+- [x] `verify.sh --all` PASS
+- [x] チェック: `examples/timed_segment_diagonal_check.csv`、`docs/timed-segment-diagonal-check.md`(`--dry-run`のみ)
+- [ ] 書き込み、SELFTEST(2026-11-20: デバイス未接続のため未実施)
+- [ ] 実機で`timed_segment_diagonal_check.csv`。失敗したら`TIMED_SEGMENT_FAIL`の行をIssue #15に記録し、原因を特定する
+- [ ] 実機でSTOP / リミット停止が従来どおり動く
+- [ ] 原因の特定と、それに対する修正
+- [ ] ゲーム側PR #197の経路分割の撤去
+
+未解決リスク:
+
+- **原因が未特定のため、この変更で実機の症状が直る保証はない。** 直らない場合も、次の失敗で`raw_b`、`running_b`、`entries_b`が採れる。
+- nativeテストのキューのモデルはMCPWM/PCNTドライバ(待機と1 stepのコマンドが交互に並ぶときの割り込み処理)を模していない。原因がそこにあればnativeでは再現しない。
+- `startTimedSegments()`が起動の失敗をアラームにするようになった。従来は黙って次のセグメントで起動していた。実機で通常の移動に誤検出がないことを確かめる。
+- キューが1000ms消化されない場合もアラームにするようになった(従来は黙って再試行を続けた)。同じく誤検出がないことを確かめる。
+- セルフレビューでの推定: Bを1秒断り続けた戻り値は、消去法で4(`DeviceNotReady`)の可能性が高い(1/7は容量の事前判定の後は出ない、2は共有DIRピンが必要、3はauto-enableが必要、6は2回で終わる)。4が1秒続くのは、Bのキューが停止扱い(`_isRunning`=false)なのにMCPWMのタイマが止まっていない場合。次の失敗が`raw_b=4 running_b=0`ならこの線、`raw_b=1`か`7`で`running_b=1`なら推定が誤り。
+- `stop()`はtimed segmentのキューに積み済みの分を止めない(SPEC.mdの既知の制約)。リミットやABORTの停止距離に関わるので、別Issueで実機確認と対策を行う。
+- FastAccelStepper 2.0.0の`forceStop()`は、コマンド受付を止めるラッチを立てる(`resumeCommands()`かramp移動で解除)。`stop()`の後、ramp移動(HOMEなど)を挟まずにtimed segmentを送ると`raw=-5`で失敗する。アラーム後はHOMEが必要なので通常は通らないが、未確認。
+- 低速側のモーターは20msのセグメントに5〜8エントリを使うので、Bのキュー(32エントリ)の先読みは約100msしかない。motionTaskがそれ以上止まるとunderrunになる。
+- 機械的な脱調(荷重、Z高さ、速度、加速度)は別に評価する。
+
