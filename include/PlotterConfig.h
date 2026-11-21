@@ -363,6 +363,26 @@ constexpr float HOMING_BACKOFF_MM = 8.0f;
 // 決め方: 起動時にswitch上へ乗っている可能性を考え、通常backoffより大きくする。
 constexpr float HOMING_START_BACKOFF_MM = 40.0f;
 
+// HOMED(位置が分かっている)のままHOMEしたとき、原点の手前まで通常の移動で先に動くか(#20)。
+// 中央からのHOMEは20 mm/sの探索がほとんどを占める(実機18.6 s)。手前までHOMING_FAST_APPROACH_FEEDで
+// 動いてから、今までどおりの原点探し(fast seek→backoff→slow seek)をする。HOMEDでないとき
+// (電源投入後、ABORT・TMCリセット等でHOMEDが外れたとき)は行わない。ドライバのENはGND直結
+// (常に通電)なので、HOMEDの間は手で押されても位置はずれない。
+constexpr bool HOMING_FAST_APPROACH_ENABLED = true;
+// 手前の位置 [mm]: X・Yそれぞれ原点からこの距離(今いる位置より原点側のときだけ動く)。
+// 決め方: 位置のずれ(脱調)があってもスイッチに速く当たらない余裕。移動中にリミットが入れば
+// アラームにする。
+constexpr float HOMING_FAST_APPROACH_MARGIN_MM = 20.0f;
+// 手前までの速さ [mm/min]。6000 = 100 mm/s(ゲームの通常移動は150〜265 mm/s)。
+constexpr float HOMING_FAST_APPROACH_FEED_MM_MIN = 6000.0f;
+static_assert(HOMING_FAST_APPROACH_MARGIN_MM >= 10.0f &&
+                  HOMING_FAST_APPROACH_MARGIN_MM < X_MAX_MM &&
+                  HOMING_FAST_APPROACH_MARGIN_MM < Y_MAX_MM,
+              "HOMING_FAST_APPROACH_MARGIN_MM must leave room before the switches and stay on the stage");
+static_assert(HOMING_FAST_APPROACH_FEED_MM_MIN > 0.0f &&
+                  HOMING_FAST_APPROACH_FEED_MM_MIN <= MAX_FEED_MM_MIN,
+              "HOMING_FAST_APPROACH_FEED_MM_MIN must be within (0, MAX_FEED_MM_MIN]");
+
 // homingで探索を許す最大移動距離 [mm]。
 // 決め方: 実ストロークより大きく、異常時に無限移動しない値にする。
 constexpr float HOMING_MAX_TRAVEL_X_MM = 550.0f;

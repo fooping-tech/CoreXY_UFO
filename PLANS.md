@@ -2726,3 +2726,22 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 
 - 電源投入から最初の動作までは100%のまま(その間torqueはOFF)。
 - 50%は暫定値。把持力が足りなければ`STS_ARM_TORQUE_LIMIT`を調整する。
+
+## 2026-11-22: HOMEの高速化: HOMEDなら原点の手前まで通常の移動(Issue #20、CoreXY_UFO_Game)
+
+実機のHOMEはステージの中央(X=195、Y=100)から18.6 s(SeekFastX 9.8 s、Backoff+SeekSlowX 2.0 s、SeekFastY 5.0 s、Backoff+SeekSlowY 1.7 s)。時間の8割は20 mm/sのfast seek。
+
+- [x] `HOMING_FAST_APPROACH_ENABLED` / `_MARGIN_MM`(20) / `_FEED_MM_MIN`(6000)と`static_assert`
+- [x] `HomingController::approachHomeFast`: HOMEDのときだけ、原点側へ手前まで動いてから原点探し。途中のlimit raw ON・アラーム・ABORTはアラームにしてHOMEDを外す
+- [x] `CONFIG`に`HOMING fast_approach=.. margin=.. feed=..`
+- [x] チェック: `examples/home_fast_approach_check.csv`、`docs/home-fast-approach-check.md`
+- [x] `verify.sh` PASS(secret-scan、native、Python、m5stack-core2 / sim / hwtestビルド)
+- [ ] 書き込み・`SELFTEST`・チェックCSV(実機。ユーザー)
+- [ ] 中央からのHOMEの時間(見込み 約7〜8 s)と`before_zero`(脱調していないこと)
+- [ ] 6000 mm/minで手前まで動くときに脱調しないこと(斜めの移動。ゲームのかんたんモードは9000で動いている)
+
+未解決リスク:
+
+- HOMEDのまま脱調していた(アラームにならない衝突など)ときは、手前の20 mmより大きくずれているとスイッチへ100 mm/sで向かう。移動中のlimit raw ONで止めるが、止まるまでの距離(減速)はある。脱調の疑いがあるときは`ZERO`でHOMEDを破棄してからHOMEする(既存の運用)。
+- 20 mmと6000 mm/minは暫定値。
+
