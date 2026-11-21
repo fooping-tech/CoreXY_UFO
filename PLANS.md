@@ -2732,7 +2732,7 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 実機のHOMEはステージの中央(X=195、Y=100)から18.6 s(SeekFastX 9.8 s、Backoff+SeekSlowX 2.0 s、SeekFastY 5.0 s、Backoff+SeekSlowY 1.7 s)。時間の8割は20 mm/sのfast seek。
 
 - [x] `HOMING_FAST_APPROACH_ENABLED` / `_MARGIN_MM`(20) / `_FEED_MM_MIN`(6000)と`static_assert`
-- [x] `HomingController::approachHomeFast`: HOMEDのときだけ、原点側へ手前まで動いてから原点探し。途中のlimit raw ON・アラーム・ABORTはアラームにしてHOMEDを外す
+- [x] `HomingController::approachHomeFast`: HOMEDのときだけ、原点側へ手前まで動いてから原点探し。途中のlimit raw ON・アラーム・ABORTはアラームにしてHOMEDを外す。移動中は`homing_active`(状態`Approach`): LCD・ジョイスティック・手動操作の禁止がHOMINGとして扱う(PR #21 レビュー)。SafetyManagerのhoming flagは立てない(通常のhard limit判定を残す)
 - [x] `CONFIG`に`HOMING fast_approach=.. margin=.. feed=..`
 - [x] チェック: `examples/home_fast_approach_check.csv`、`docs/home-fast-approach-check.md`
 - [x] `verify.sh` PASS(secret-scan、native、Python、m5stack-core2 / sim / hwtestビルド)

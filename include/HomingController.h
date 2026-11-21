@@ -16,6 +16,7 @@ class HomingController {
 
   enum class State : uint8_t {
     Idle,
+    Approach,  // #20: HOMED, to near the origin at the normal speed first
     SeekFastX,
     BackoffX,
     SeekSlowX,

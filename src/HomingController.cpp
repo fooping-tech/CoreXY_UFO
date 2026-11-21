@@ -211,12 +211,18 @@ bool HomingController::approachHomeFast(StepperBackendFastAccel& backend,
       CoreXYKinematics::xyDeltaToABSteps(dx_mm, dy_mm, STEPS_PER_MM);
   // failing on the way: the position is no longer trusted (HOME again does the full seek)
   auto fail = [&](const char* reason) {
+    machine.homing_active = false;
     machine.homed = false;
     machine.x_homed = false;
     machine.y_homed = false;
     markAlarm(reason, safety, machine);
     return false;
   };
+  // review on #21: the status, the LCD and the joystick see HOMING (not READY) and the manual
+  // moves stay locked while it moves. The safety manager's own homing flag stays off: the
+  // normal hard-limit checks still apply (the machine is homed)
+  machine.homing_active = true;
+  setState(State::Approach, machine, "HOMED_FAST_APPROACH");
   logMessage("HOME fast approach from=(%.3f,%.3f) to=(%.3f,%.3f) A=%ld B=%ld F=%.3f",
              x0, y0, tx, ty, delta.a_steps, delta.b_steps,
              HOMING_FAST_APPROACH_FEED_MM_MIN);
@@ -224,6 +230,7 @@ bool HomingController::approachHomeFast(StepperBackendFastAccel& backend,
   applyABStepDeltaToMachine(delta.a_steps, delta.b_steps, machine);
 #else
   if (backend.isRunning()) {
+    machine.homing_active = false;
     logMessage("REJECT: homing backend is running");
     return false;
   }
@@ -264,6 +271,8 @@ const char* HomingController::stateName() const {
   switch (state_) {
     case State::Idle:
       return "Idle";
+    case State::Approach:
+      return "Approach";
     case State::SeekFastX:
       return "SeekFastX";
     case State::BackoffX:
@@ -433,6 +442,7 @@ bool HomingController::homeAxis(Axis axis, StepperBackendFastAccel& backend,
       }
 
       case State::Idle:
+      case State::Approach:
       case State::Complete:
       case State::Alarm:
         markAlarm("homing invalid state", safety, machine);
