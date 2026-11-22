@@ -8,6 +8,9 @@
 #include "Core2PinMap.h"
 #include "PlotterConfig.h"
 
+// (the main firmware and the hwtest build each define it)
+void logMessage(const char* format, ...);
+
 namespace {
 // Dedicated UART1. UART2 is reserved for the TMC2209 bus.
 // The external adapter provides the required half-duplex TTL direction control.
@@ -408,11 +411,15 @@ StsMoveResult StsServoBus::moveRelative(uint8_t id, int32_t delta_counts,
   }
   // Idle drift must stay small; a large jump means the turn count is unknown.
   const int drift = wrapDeltaCounts(raw_counts - state.last_raw_counts);
-  if (abs(drift) > STS_TEST_TOLERANCE_COUNTS) {
+  if (abs(drift) > STS_IDLE_DRIFT_MAX_COUNTS) {
     state.valid = false;
     snprintf(detail, detail_size,
              "reason=idle_drift drift=%+d tracking=INVALID (power-cycle servo)", drift);
     return StsMoveResult::REJECTED;
+  }
+  if (abs(drift) > STS_TEST_TOLERANCE_COUNTS) {
+    // #23: moved a little while idle (a gripped object pressing back): taken into the count
+    logMessage("SERVO id=%u idle_drift=%+d accepted (max %d)", id, drift, STS_IDLE_DRIFT_MAX_COUNTS);
   }
   updateTracking(state, raw_counts);
   const int32_t start_counts = state.abs_counts;
@@ -562,11 +569,14 @@ bool StsServoBus::beginJog(uint8_t id, StsJogTracking& tracking, char* detail,
     return false;
   }
   const int drift = wrapDeltaCounts(raw_counts - state.last_raw_counts);
-  if (abs(drift) > STS_TEST_TOLERANCE_COUNTS) {
+  if (abs(drift) > STS_IDLE_DRIFT_MAX_COUNTS) {
     state.valid = false;
     snprintf(detail, detail_size,
              "reason=idle_drift drift=%+d tracking=INVALID (power-cycle servo)", drift);
     return false;
+  }
+  if (abs(drift) > STS_TEST_TOLERANCE_COUNTS) {
+    logMessage("SERVO id=%u idle_drift=%+d accepted (max %d)", id, drift, STS_IDLE_DRIFT_MAX_COUNTS);
   }
   updateTracking(state, raw_counts);
   if (!holdAndVerify(id, state.abs_counts, raw_counts, detail, detail_size)) {

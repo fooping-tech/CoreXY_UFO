@@ -2804,3 +2804,8 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 
 - 前のCore2ではLowで正常だった。構成ごとに極性が違う理由(NO/NCの取り違え、pull-up/pull-downの違い)は未確認。前の構成に戻すとHOMEが動かない(押していないのにON、またはスイッチに当たっても止まらずmax travel alarm)。
 
+## 2026-11-22: 待機中のずれの上限 (#23)
+
+- [x] `STS_IDLE_DRIFT_MAX_COUNTS`=256 を `moveRelative` と JOG 開始で使う。上限以内は追跡に取り込みログ1行
+- [x] `CONFIG` の `SERVO_LIMITS` に `idle_drift_max`
+- [ ] 実機: カプセルを握って運び、放せる(ゲームのかんたんモード)
