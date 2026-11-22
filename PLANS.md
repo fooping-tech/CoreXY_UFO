@@ -2718,8 +2718,8 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 - [x] `verify.sh` PASS(secret-scan、native、Python、m5stack-core2 / sim / hwtestビルド)
 - [x] 書き込み、起動ログ(ID 1/2 ping=OK)、`SERVO_STATUS 1/2`応答
 - [x] チェック: `examples/servo_torque_limit_check.csv`、`docs/servo-torque-limit-check.md`(Codexレビュー P1)。`--dry-run`のみ実施
-- [ ] 実機でID 2を動かした後に`torque_limit=500`となること(ユーザー判断で今回は動かしていない)
-- [ ] サーボ電源再投入 → 次の動作で500へ戻ること
+- [x] 実機でID 2を動かした後に`torque_limit=500`となること(2026-11-19、ユーザーが実機で確認済みと報告。測定ログは残っていない)
+- [x] サーボ電源再投入 → 次の動作で500へ戻ること(同上)
 - [ ] 50%で爪の把持力が足りるか
 
 未解決リスク:
@@ -2746,4 +2746,51 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 
 - HOMEDのまま脱調していた(アラームにならない衝突など)ときは、手前の20 mmより大きくずれているとスイッチへ100 mm/sで向かう。移動中のlimit raw ONで止めるが、止まるまでの距離(減速)はある。脱調の疑いがあるときは`ZERO`でHOMEDを破棄してからHOMEする(既存の運用)。
 - 20 mmと6000 mm/minは暫定値。
+
+## 2026-11-20: 45°付近のXY移動でのtimed segmentキューエラー(Issue #15)
+
+- [x] 静的調査: FastAccelStepper 2.0.0の`moveTimed()`、`addQueueEntry()`、方向切替の待機、ESP32 MCPWM/PCNTドライバを読んだ。Bが1000ms断られ続ける戻り値は特定できなかった
+- [x] `TimedSegmentFeeder.h`: 待機挿入(5/6)は未登録として送り直し、A/Bの時間差を次のセグメントの時間で補正、underrunを数える、失敗時のスナップショット
+- [x] セルフレビュー対応: 時間差の補正を待機の追加からセグメント時間の延長へ(最高速のモーターに200usの停止が入っていた)、起動失敗時のスナップショット(`stage=start`)、キューが消化されない場合の停止(`stage=capacity_stall`)、`first_raw_b`と`suspended_*`、134秒を超えるセグメントの拒否
+- [x] `TIMED_SEGMENT_FAIL` / `TIMED_SEGMENT_QUEUES` / `TIMED_SEGMENT_STATS`の診断行
+- [x] `startTimedSegments()`で実際の起動を確認
+- [x] FastAccelStepperを2.0.0に固定
+- [x] nativeテスト`test_timed_segment_feeder.cpp`: Issueの2例、B=0、A=0、B/A 0.018 / 0.046 / 0.052 / 0.1、純X / 純Y、方向反転、Bの一時的な拒否、Bが詰まった場合の1000ms停止とスナップショット、キュー満杯、キューが消化されない場合、起動失敗、underrun、速い側のモーターに待機が入らないこと
+- [x] `verify.sh --all` PASS
+- [x] チェック: `examples/timed_segment_diagonal_check.csv`、`docs/timed-segment-diagonal-check.md`(`--dry-run`のみ)
+- [ ] 書き込み、SELFTEST(2026-11-20: デバイス未接続のため未実施)
+- [ ] 実機で`timed_segment_diagonal_check.csv`。失敗したら`TIMED_SEGMENT_FAIL`の行をIssue #15に記録し、原因を特定する
+- [ ] 実機でSTOP / リミット停止が従来どおり動く
+- [ ] 原因の特定と、それに対する修正
+- [ ] ゲーム側PR #197の経路分割の撤去
+
+未解決リスク:
+
+- **原因が未特定のため、この変更で実機の症状が直る保証はない。** 直らない場合も、次の失敗で`raw_b`、`running_b`、`entries_b`が採れる。
+- nativeテストのキューのモデルはMCPWM/PCNTドライバ(待機と1 stepのコマンドが交互に並ぶときの割り込み処理)を模していない。原因がそこにあればnativeでは再現しない。
+- `startTimedSegments()`が起動の失敗をアラームにするようになった。従来は黙って次のセグメントで起動していた。実機で通常の移動に誤検出がないことを確かめる。
+- キューが1000ms消化されない場合もアラームにするようになった(従来は黙って再試行を続けた)。同じく誤検出がないことを確かめる。
+- セルフレビューでの推定: Bを1秒断り続けた戻り値は、消去法で4(`DeviceNotReady`)の可能性が高い(1/7は容量の事前判定の後は出ない、2は共有DIRピンが必要、3はauto-enableが必要、6は2回で終わる)。4が1秒続くのは、Bのキューが停止扱い(`_isRunning`=false)なのにMCPWMのタイマが止まっていない場合。次の失敗が`raw_b=4 running_b=0`ならこの線、`raw_b=1`か`7`で`running_b=1`なら推定が誤り。
+- `stop()`はtimed segmentのキューに積み済みの分を止めない(SPEC.mdの既知の制約)。リミットやABORTの停止距離に関わるので、別Issueで実機確認と対策を行う。
+- FastAccelStepper 2.0.0の`forceStop()`は、コマンド受付を止めるラッチを立てる(`resumeCommands()`かramp移動で解除)。`stop()`の後、ramp移動(HOMEなど)を挟まずにtimed segmentを送ると`raw=-5`で失敗する。アラーム後はHOMEが必要なので通常は通らないが、未確認。
+- 低速側のモーターは20msのセグメントに5〜8エントリを使うので、Bのキュー(32エントリ)の先読みは約100msしかない。motionTaskがそれ以上止まるとunderrunになる。
+- 機械的な脱調(荷重、Z高さ、速度、加速度)は別に評価する。
+
+## 2026-11-20: SERVO_TURNの1回の上限(Issue #16)
+
+- [x] `stsMaxTurns(id)`: ID 1 = 6回転、ID 2 = 3回転。`handleServoMove`(`turns_over`)と`moveRelative`(`delta_out_of_range`)の両方に適用
+- [x] `CONFIG`に`SERVO_LIMITS max_turns id1=.. id2=.. abs_limit_counts=.. speed=..`
+- [x] WebUI `Test`タブの入力上限をIDごとに
+- [x] チェック: `examples/servo_turn_limit_check.csv`(動かさない)、`examples/servo_turn_limit_move_check.csv`(Zが3.55回転動く)、`docs/servo-turn-limit-check.md`
+- [x] `verify.sh` PASS
+- [ ] 書き込み、SELFTEST、`servo_turn_limit_check.csv`(2026-11-20: デバイス未接続のため未実施)
+- [ ] 実機: `SERVO_TURN 1 3.55`(校正済みの上下の幅14711 countsの内側)が1回で通り、途中で止まらない
+- [ ] 実機: 長い移動の途中の`ABORT`でhold停止する
+- [ ] ホスト側(CoreXY_UFO_Game): `MAX_TURNS_PER_COMMAND`を`CONFIG`の値で切り替える、`FakeFirmware`の`turns_over`
+
+未解決リスク:
+
+- 6回転の所要時間とtimeout余裕(計算上1.5s)は実機未確認。余裕は移動量によらず一定なので、許容できる速度低下は3回転の約23%から6回転では約13%に減る。`TIMEOUT`のときはtorque ONのままgoalも有効で、サーボは追跡なしで動き続ける(従来どおり)。その後の`SERVO_TURN`は`idle_drift`で追跡無効になる。負荷付きで`TIMEOUT`が出る場合は`STS_TEST_TIMEOUT_MARGIN_MS`を見直す。
+- `ABORT`でのhold停止は、止まるまで待たずに戻る(従来どおり。JOGの`waitJogSettled()`に当たるものがない)。2400 counts/sからの減速の行き過ぎは計算上約580 counts。`ABORT`から約1秒以内に次の`SERVO_TURN`を送ると`idle_drift`になる可能性がある。移動量には依存しないが、長い移動の途中の`ABORT`を実機で確認するときに見る。
+- 1回の移動が長くなる分、`STOP`で止められない時間も長くなる(`SERVO_TURN`は`ABORT`でのみ中断)。
 

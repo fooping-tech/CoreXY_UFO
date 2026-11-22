@@ -305,6 +305,52 @@ bool waitForMotionOrLimit() {
   return waitForMotionOrLimit(reference);
 }
 
+void logTimedSegmentStats() {
+  const timed_segment::RunStats& stats = stepper_backend.timedSegmentStats();
+  logMessage("TIMED_SEGMENT_STATS segments=%lu underruns_a=%lu underruns_b=%lu "
+             "pauses_a=%lu pauses_b=%lu stretch_ticks_a=%lu stretch_ticks_b=%lu "
+             "max_stretch_ticks=%lu b_retries=%lu max_b_wait_ms=%lu skew_ticks=%ld",
+             static_cast<unsigned long>(stats.segments),
+             static_cast<unsigned long>(stats.underruns_a),
+             static_cast<unsigned long>(stats.underruns_b),
+             static_cast<unsigned long>(stats.pause_injections_a),
+             static_cast<unsigned long>(stats.pause_injections_b),
+             static_cast<unsigned long>(stats.stretch_ticks_a),
+             static_cast<unsigned long>(stats.stretch_ticks_b),
+             static_cast<unsigned long>(stats.max_stretch_ticks),
+             static_cast<unsigned long>(stats.b_retries),
+             static_cast<unsigned long>(stats.max_b_wait_ms),
+             static_cast<long>(stats.skew_ticks));
+}
+
+// What the backend recorded when it refused a segment, and the counters of
+// the run. Nothing is printed while segments are being queued. stop() only
+// stops new commands: entries already queued may still be playing here.
+void logTimedSegmentDiagnostics() {
+  const timed_segment::Failure& failure = stepper_backend.lastTimedSegmentFailure();
+  if (failure.valid) {
+    logMessage("TIMED_SEGMENT_FAIL stage=%s segment=%lu start=%u raw_a=%d raw_b=%d "
+               "first_raw_b=%d a_steps=%ld b_steps=%ld ticks=%lu waited_ms=%lu "
+               "b_retries=%lu",
+               timed_segment::stageName(failure.stage),
+               static_cast<unsigned long>(failure.segment_index), failure.start,
+               failure.raw_a, failure.raw_b, failure.first_raw_b,
+               static_cast<long>(failure.a_steps), static_cast<long>(failure.b_steps),
+               static_cast<unsigned long>(failure.duration_ticks),
+               static_cast<unsigned long>(failure.waited_ms),
+               static_cast<unsigned long>(failure.b_retries));
+    logMessage("TIMED_SEGMENT_QUEUES entries_a=%u entries_b=%u running_a=%u "
+               "running_b=%u suspended_a=%u suspended_b=%u pause_ticks_a=%lu "
+               "pause_ticks_b=%lu skew_ticks=%ld",
+               failure.entries_a, failure.entries_b, failure.running_a,
+               failure.running_b, failure.suspended_a, failure.suspended_b,
+               static_cast<unsigned long>(failure.pause_ticks_a),
+               static_cast<unsigned long>(failure.pause_ticks_b),
+               static_cast<long>(failure.skew_ticks));
+  }
+  logTimedSegmentStats();
+}
+
 void handleTimedSegmentQueueError(const MotionSyncReference& reference,
                                   const char* context) {
   stepper_backend.stop();
@@ -316,6 +362,7 @@ void handleTimedSegmentQueueError(const MotionSyncReference& reference,
   logMessage("%s: ERROR position confidence lost; resynced from backend X=%.3f Y=%.3f A=%ld B=%ld",
              context, machine_state.x_mm, machine_state.y_mm,
              machine_state.a_steps, machine_state.b_steps);
+  logTimedSegmentDiagnostics();
 }
 
 bool queueTimedSegmentWithRetry(const MotionSegment& segment, bool start,
@@ -363,7 +410,10 @@ XYRunResult executeTimedSegments(SegmentQueue& queue, const MotionBlock& block) 
   MotionSegment segment{};
   if (!queue.dequeue(segment)) return XYRunResult::FAILED;
   if (!queueTimedSegmentWithRetry(segment, false, reference)) return XYRunResult::FAILED;
-  if (!stepper_backend.startTimedSegments()) return XYRunResult::FAILED;
+  if (!stepper_backend.startTimedSegments()) {
+    handleTimedSegmentQueueError(reference, "Motion stopped at timed segment start");
+    return XYRunResult::FAILED;
+  }
   setMotionActive(true);
   int32_t queued_a_steps = segment.a_steps;
   int32_t queued_b_steps = segment.b_steps;
@@ -398,6 +448,13 @@ XYRunResult executeTimedSegments(SegmentQueue& queue, const MotionBlock& block) 
   }
   const bool completed = waitForMotionOrLimit(reference);
   setMotionActive(false);
+  // An axis that ran dry mid-move still ends on the right step count, but the
+  // path between was not the planned line. Say so instead of staying silent.
+  const timed_segment::RunStats& stats = stepper_backend.timedSegmentStats();
+  if (stats.underruns_a > 0 || stats.underruns_b > 0) {
+    logMessage("WARN: timed segment queue ran dry during the move");
+    logTimedSegmentStats();
+  }
   if (!completed) return XYRunResult::FAILED;
   return stopping ? XYRunResult::STOPPED : XYRunResult::COMPLETED;
 }
@@ -1251,8 +1308,9 @@ void handleServoMove(const CommandMessage& command) {
     result = sts_servo_bus.moveToAngle(command.servo_id, command.servo_value,
                                        isMotionAbortRequested, detail, sizeof(detail));
     setMotionActive(false);
-  } else if (fabsf(command.servo_value) > STS_TEST_MAX_TURNS) {
-    snprintf(detail, sizeof(detail), "reason=turns_over max=%.1f", STS_TEST_MAX_TURNS);
+  } else if (fabsf(command.servo_value) > stsMaxTurns(command.servo_id)) {
+    snprintf(detail, sizeof(detail), "reason=turns_over max=%.1f",
+             stsMaxTurns(command.servo_id));
   } else {
     const int32_t delta_counts =
         static_cast<int32_t>(lroundf(command.servo_value * STS_COUNTS_PER_TURN));
