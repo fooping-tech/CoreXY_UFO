@@ -520,11 +520,17 @@ ALARM > HOMING > MOVING > RUNNING > NEED HOME > READY
 
 脱調や手動停止により論理座標が信用できない状態から再homingする場合は、`ALARM_CLEAR`の前に`ZERO`を実行して現在の論理座標とhomed状態を破棄する。
 HOMEを扱うserial check CSVでは、原則として`ZERO -> ALARM_CLEAR -> HOME`の順にする。
+`HOME`は、HOMED(`homed`・`x_homed`・`y_homed`)のまま実行したとき、原点探しの前に原点の手前まで通常の移動で動く(#20、`HOMING_FAST_APPROACH_ENABLED`)。
+手前の位置はX・Yそれぞれ原点から`HOMING_FAST_APPROACH_MARGIN_MM`(20 mm)で、今いる位置より原点側のときだけ動く。速さは`HOMING_FAST_APPROACH_FEED_MM_MIN`(6000 mm/min)。
+そのあとは今までどおりX→Yの順にSeekFast→Backoff→SeekSlow。HOMEDでないとき(電源投入後、`ZERO`、ABORT、TMCリセットなどでHOMEDが外れたとき)、アラーム中、開始時にlimitがONのときは行わない。
+モータのENはGND直結で常に通電しているため、HOMEDの間は手で押されても論理座標はずれない(脱調の疑いがあるときはSPECのとおり`ZERO`でHOMEDを破棄してから`HOME`する)。
+手前への移動中にlimitのrawがON、アラーム、ABORTのときは止めてアラームにし、HOMEDを外す(位置がずれていた)。`HOME_X`・`HOME_Y`は対象外。
 HOME開始時またはSeekFast中に対象limitのrawまたはdebouncedがONなら、seek方向へ押し込まず即Backoffへ入る。
 BackoffからSeekSlowへ移る条件は、対象limitのrawとdebouncedの両方がOFFになることとする。
 HomingのSeekFast、Backoff、SeekSlowは短い固定距離moveの反復ではなく、各フェーズの上限距離ぶんの長いmoveを開始し、limit条件成立時にbackendを停止する。
 これにより`HOMING_SEEK_FEED_MM_MIN`と`HOMING_SLOW_FEED_MM_MIN`は、加速距離が足りる範囲で実効速度へ反映される。
 停止後のMachineStateはFastAccelStepperのA/B現在ステップ差分から更新する。
+`StepperBackendFastAccel`のランプ移動(`moveASteps`/`moveBSteps`/`moveABSteps`)は、止まっているときはFastAccelStepperのキューの最後の位置からの絶対移動(`moveTo`)で行う。FastAccelStepperの`move()`はランプ生成器の前回の目標に足すが、timed segment(`moveTimed()`)はその目標を更新しないため、G-codeの移動のあとに`move()`を使うと移動量がずれる(#20で発見)。動作中に呼ばれたときは`move()`のまま。
 通常XY/timed segment実行中も、FastAccelStepperの現在A/Bステップ差分からMachineStateのX/Y概算位置を更新しながらSafetyManagerをpollする。
 これにより、ブロック完了前でも原点から離れた位置でlimit activeが継続した場合にhard limit alarmへ入れる。
 XY batch完了時には、ジョブ開始、HOME、ZEROなどで揃えたbackend基準からの相対A/B stepとMachineStateの相対A/B stepを比較する。不一致があれば`WARN: DRIFT a=... b=...`をログし、timed segment部分投入や状態更新漏れの再発を検出する。

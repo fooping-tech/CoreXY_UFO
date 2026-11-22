@@ -123,13 +123,30 @@ void StepperBackendFastAccel::configureSpeed(float feed_mm_min) {
 #endif
 }
 
+#if !SIMULATION_MODE
+namespace {
+// Relative ramp move from where the queue ends. FastAccelStepper's move()
+// adds to the ramp generator's last target, which moveTimed() (the timed
+// A/B segments of G0/G1) never updates: after a G-code move, move(n) would
+// go to <the target before the G-code move> + n (#20: the HOMED fast approach
+// ran into the X switch). While a ramp is running, move() is still right.
+void moveRelative(FastAccelStepper* motor, int32_t steps) {
+  if (motor->isRunning()) {
+    motor->move(steps);
+  } else {
+    motor->moveTo(motor->getPositionAfterCommandsCompleted() + steps);
+  }
+}
+}  // namespace
+#endif
+
 bool StepperBackendFastAccel::moveASteps(int32_t steps) {
 #if SIMULATION_MODE
   (void)steps;
   return true;
 #else
   if (motor_a_ == nullptr) return false;
-  motor_a_->move(steps);
+  moveRelative(motor_a_, steps);
   return true;
 #endif
 }
@@ -140,7 +157,7 @@ bool StepperBackendFastAccel::moveBSteps(int32_t steps) {
   return true;
 #else
   if (motor_b_ == nullptr) return false;
-  motor_b_->move(steps);
+  moveRelative(motor_b_, steps);
   return true;
 #endif
 }
@@ -159,8 +176,8 @@ bool StepperBackendFastAccel::moveABSteps(int32_t a_steps, int32_t b_steps,
 #else
   if (motor_a_ == nullptr || motor_b_ == nullptr) return false;
   configureSpeed(feed_mm_min);
-  motor_a_->move(a_steps);
-  motor_b_->move(b_steps);
+  moveRelative(motor_a_, a_steps);
+  moveRelative(motor_b_, b_steps);
   return true;
 #endif
 }

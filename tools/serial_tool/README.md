@@ -113,6 +113,7 @@ python tools/serial_tool/serial_send.py \
 | [CoreXY Check](docs/corexy-check.md) | CoreXY変換ログと短いXY移動 | `examples/corexy_check.csv` |
 | [Limit Check](docs/limit-check.md) | X/Y limit switch入力のpin、極性、debounce確認 | `examples/limit_check.csv` |
 | [Homing Check](docs/homing-check.md) | X/Y limitを使った二段階homingとhomed状態 | `examples/homing_check.csv` |
+| [Home Fast Approach Check](docs/home-fast-approach-check.md) | HOMEDのHOMEで原点の手前まで速く動いてから原点探し(#20) | `examples/home_fast_approach_check.csv` |
 | [Abort Check](docs/abort-check.md) | ABORTと中断後のalarm復旧確認 | `examples/abort_check.csv` |
 | [Trapezoid Check](docs/trapezoid-check.md) | MotionBlockの台形/三角加減速計画ログ | `examples/trapezoid_check.csv` |
 | [Timed Segment Check](docs/timed-segment-check.md) | DDA timed segment生成とFastAccelStepper `moveTimed()`投入 | `examples/timed_segment_check.csv` |

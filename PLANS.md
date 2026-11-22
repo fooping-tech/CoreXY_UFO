@@ -2727,6 +2727,26 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 - 電源投入から最初の動作までは100%のまま(その間torqueはOFF)。
 - 50%は暫定値。把持力が足りなければ`STS_ARM_TORQUE_LIMIT`を調整する。
 
+## 2026-11-22: HOMEの高速化: HOMEDなら原点の手前まで通常の移動(Issue #20、CoreXY_UFO_Game)
+
+実機のHOMEはステージの中央(X=195、Y=100)から18.6 s(SeekFastX 9.8 s、Backoff+SeekSlowX 2.0 s、SeekFastY 5.0 s、Backoff+SeekSlowY 1.7 s)。時間の8割は20 mm/sのfast seek。
+
+- [x] `HOMING_FAST_APPROACH_ENABLED` / `_MARGIN_MM`(20) / `_FEED_MM_MIN`(6000)と`static_assert`
+- [x] `HomingController::approachHomeFast`: HOMEDのときだけ、原点側へ手前まで動いてから原点探し。途中のlimit raw ON・アラーム・ABORTはアラームにしてHOMEDを外す。移動中は`homing_active`(状態`Approach`): LCD・ジョイスティック・手動操作の禁止がHOMINGとして扱う(PR #21 レビュー)。SafetyManagerのhoming flagは立てない(通常のhard limit判定を残す)
+- [x] `CONFIG`に`HOMING fast_approach=.. margin=.. feed=..`
+- [x] チェック: `examples/home_fast_approach_check.csv`、`docs/home-fast-approach-check.md`
+- [x] `verify.sh` PASS(secret-scan、native、Python、m5stack-core2 / sim / hwtestビルド)
+- [x] 実機で発見(2026-11-22): G0で中央(195,100)へ動いた後のHOMEが`homing fast approach hit a limit (position off)`。FastAccelStepperの`move()`はランプ生成器の前回の目標に足すが、`moveTimed()`(G0/G1)はその目標を更新しない。HOME後のG0のあと、Aは-20400のはずが-44002 steps動いてXスイッチに当たった。`StepperBackendFastAccel`の`moveASteps`/`moveBSteps`/`moveABSteps`を、止まっているときはキューの最後の位置(`getPositionAfterCommandsCompleted()`)からの`moveTo()`にした(テストモーター移動`TEST_A`/`TEST_B`/`XY`系も同じ不具合があった)
+- [x] 実機: HOME → `G0 X195 Y100 F6000` → HOME で手前(20,20)まで動いてから原点探し、`before_zero` X=0.025 Y=-0.012。修正前は同じ手順で再現
+- [ ] `SELFTEST`・チェックCSV(実機)
+- [ ] 中央からのHOMEの時間(見込み 約7〜8 s)
+- [ ] 6000 mm/minで手前まで動くときに脱調しないこと(斜めの移動。ゲームのかんたんモードは9000で動いている)
+
+未解決リスク:
+
+- HOMEDのまま脱調していた(アラームにならない衝突など)ときは、手前の20 mmより大きくずれているとスイッチへ100 mm/sで向かう。移動中のlimit raw ONで止めるが、止まるまでの距離(減速)はある。脱調の疑いがあるときは`ZERO`でHOMEDを破棄してからHOMEする(既存の運用)。
+- 20 mmと6000 mm/minは暫定値。
+
 ## 2026-11-20: 45°付近のXY移動でのtimed segmentキューエラー(Issue #15)
 
 - [x] 静的調査: FastAccelStepper 2.0.0の`moveTimed()`、`addQueueEntry()`、方向切替の待機、ESP32 MCPWM/PCNTドライバを読んだ。Bが1000ms断られ続ける戻り値は特定できなかった

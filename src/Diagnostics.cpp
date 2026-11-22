@@ -89,6 +89,9 @@ void Diagnostics::printConfig() {
              HOMING_MAX_TRAVEL_Y_MM, HOMING_LIMIT_DEBOUNCE_MS,
              HARD_LIMIT_UNEXPECTED_ALARM_MS, NORMAL_MOVE_LIMIT_RELEASE_MM,
              LIMIT_ACTIVE_LOW ? "LOW" : "HIGH");
+  logMessage("HOMING fast_approach=%u margin=%.3f feed=%.3f",
+             HOMING_FAST_APPROACH_ENABLED, HOMING_FAST_APPROACH_MARGIN_MM,
+             HOMING_FAST_APPROACH_FEED_MM_MIN);
   logMessage("M5_UI=%s LCD_SPI_MOSI=%u MOTOR_EN=HARDWIRED_GND",
              M5_UI_ENABLED ? "ENABLED" : "DISABLED", CORE2_LCD_SPI_MOSI_PIN);
   logMessage("CORE UI=%u MOTION=%u PRIORITY ui=%u command=%u tmc=%u safety=%u motion=%u stepper=%u",

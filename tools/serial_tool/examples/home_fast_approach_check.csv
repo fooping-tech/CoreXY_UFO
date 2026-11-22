@@ -1,0 +1,14 @@
+command,delay_ms,expect,comment
+CONFIG,500,HOMING fast_approach=1,Confirm the fast approach is on and its margin / feed
+POS,500,POS,Confirm machine is not alarmed
+ZERO,500,ZERO,Forget the logical position: the first HOME is the full seek
+ALARM_CLEAR,500,ALARM_CLEAR complete,Clear a previous alarm before a deliberate homing check
+HOME,500,HOME fast approach skipped: not homed,Not homed: the usual seek from wherever it is
+POS,500,HOMED=YES,Homed at the origin
+XY 195 100 3000,4000,"ACK_XY target=(195.000,100.000)",To the middle of the stage
+HOME,500,"HOME fast approach from=(195.000,100.000) to=(20.000,20.000)",Homed: to 20 mm before the origin first then the seek
+HOME_STATUS,500,homed=YES,Homed again
+POS,500,HOMED=YES,Check the HOME_X / HOME_Y before_zero is about 0 (no lost steps)
+XY 10 150 3000,4000,"ACK_XY target=(10.000,150.000)",Near the X origin already
+HOME,500,"HOME fast approach from=(10.000,150.000) to=(10.000,20.000)",X stays (already nearer than 20 mm) only Y comes nearer
+POS,500,HOMED=YES,Homed

@@ -16,6 +16,7 @@ class HomingController {
 
   enum class State : uint8_t {
     Idle,
+    Approach,  // #20: HOMED, to near the origin at the normal speed first
     SeekFastX,
     BackoffX,
     SeekSlowX,
@@ -46,6 +47,9 @@ class HomingController {
     TargetAnyReleased,
   };
 
+  // #20: HOMED -> near the origin at the normal speed first (skipped / true when not HOMED)
+  bool approachHomeFast(StepperBackendFastAccel& backend, SafetyManager& safety,
+                        MachineState& machine);
   bool homeAxis(Axis axis, StepperBackendFastAccel& backend,
                 SafetyManager& safety, MachineState& machine);
   bool moveUntilCondition(Axis axis, int8_t direction, float distance_limit_mm,

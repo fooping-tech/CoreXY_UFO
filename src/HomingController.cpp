@@ -137,6 +137,9 @@ bool HomingController::runHomeY(StepperBackendFastAccel& backend,
 
 bool HomingController::runHome(StepperBackendFastAccel& backend,
                                SafetyManager& safety, MachineState& machine) {
+  if (!approachHomeFast(backend, safety, machine)) {
+    return false;
+  }
   if (!homeAxis(Axis::X, backend, safety, machine)) {
     safety.setHomingActive(false);
     machine.homing_active = false;
@@ -167,12 +170,109 @@ bool HomingController::runHome(StepperBackendFastAccel& backend,
   return true;
 }
 
+// #20: with HOMED (the position is known) the long 20 mm/s seek is skipped: first to
+// HOMING_FAST_APPROACH_MARGIN_MM from the origin on each axis (only towards it) at the normal
+// speed, then the usual seek / backoff / slow seek from there. A limit switch closing on the way
+// means the position was wrong: stop and alarm. Not HOMED: nothing (the usual homing).
+bool HomingController::approachHomeFast(StepperBackendFastAccel& backend,
+                                        SafetyManager& safety,
+                                        MachineState& machine) {
+  if (!HOMING_FAST_APPROACH_ENABLED) {
+    return true;
+  }
+  if (!(machine.homed && machine.x_homed && machine.y_homed)) {
+    logMessage("HOME fast approach skipped: not homed (the full seek)");
+    return true;
+  }
+  safety.poll();
+  if (safety.isAlarmed() || safety.xLimitActive() || safety.yLimitActive() ||
+      safety.xLimitRawActive() || safety.yLimitRawActive()) {
+    logMessage("HOME fast approach skipped: alarm or a limit switch is on");
+    return true;
+  }
+  const float x0 = machine.x_mm;
+  const float y0 = machine.y_mm;
+  if (!isfinite(x0) || !isfinite(y0)) {
+    logMessage("HOME fast approach skipped: position unknown");
+    return true;
+  }
+  // towards the origin only (HOMING_*_DIR = -1: the switches are at the minimum)
+  const float tx = HOMING_X_DIR < 0 ? fminf(x0, X_MIN_MM + HOMING_FAST_APPROACH_MARGIN_MM)
+                                    : fmaxf(x0, X_MAX_MM - HOMING_FAST_APPROACH_MARGIN_MM);
+  const float ty = HOMING_Y_DIR < 0 ? fminf(y0, Y_MIN_MM + HOMING_FAST_APPROACH_MARGIN_MM)
+                                    : fmaxf(y0, Y_MAX_MM - HOMING_FAST_APPROACH_MARGIN_MM);
+  const float dx_mm = tx - x0;
+  const float dy_mm = ty - y0;
+  if (fabsf(dx_mm) < 1.0f && fabsf(dy_mm) < 1.0f) {
+    logMessage("HOME fast approach skipped: already near the origin X=%.3f Y=%.3f", x0, y0);
+    return true;
+  }
+  const CoreXYDelta delta =
+      CoreXYKinematics::xyDeltaToABSteps(dx_mm, dy_mm, STEPS_PER_MM);
+  // failing on the way: the position is no longer trusted (HOME again does the full seek)
+  auto fail = [&](const char* reason) {
+    machine.homing_active = false;
+    machine.homed = false;
+    machine.x_homed = false;
+    machine.y_homed = false;
+    markAlarm(reason, safety, machine);
+    return false;
+  };
+  // review on #21: the status, the LCD and the joystick see HOMING (not READY) and the manual
+  // moves stay locked while it moves. The safety manager's own homing flag stays off: the
+  // normal hard-limit checks still apply (the machine is homed)
+  machine.homing_active = true;
+  setState(State::Approach, machine, "HOMED_FAST_APPROACH");
+  logMessage("HOME fast approach from=(%.3f,%.3f) to=(%.3f,%.3f) A=%ld B=%ld F=%.3f",
+             x0, y0, tx, ty, delta.a_steps, delta.b_steps,
+             HOMING_FAST_APPROACH_FEED_MM_MIN);
+#if SIMULATION_MODE
+  applyABStepDeltaToMachine(delta.a_steps, delta.b_steps, machine);
+#else
+  if (backend.isRunning()) {
+    machine.homing_active = false;
+    logMessage("REJECT: homing backend is running");
+    return false;
+  }
+  if (!backend.moveABSteps(delta.a_steps, delta.b_steps,
+                           HOMING_FAST_APPROACH_FEED_MM_MIN)) {
+    return fail("homing fast approach backend rejected move");
+  }
+  while (backend.isRunning()) {
+    safety.poll();
+    if (safety.isAlarmed()) {
+      backend.stop();
+      backend.waitUntilIdle();
+      return fail(safety.alarmReason());
+    }
+    if (safety.xLimitRawActive() || safety.yLimitRawActive()) {
+      // the switches are HOMING_FAST_APPROACH_MARGIN_MM further on: the position was off
+      backend.stop();
+      backend.waitUntilIdle();
+      return fail("homing fast approach hit a limit (position off)");
+    }
+    if (isMotionAbortRequested()) {
+      backend.stop();
+      backend.waitUntilIdle();
+      clearMotionAbort();
+      return fail("abort requested");
+    }
+    vTaskDelay(pdMS_TO_TICKS(kMovePollMs));
+  }
+  setMachinePosition(tx, ty, machine);
+#endif
+  logMessage("HOME fast approach complete X=%.3f Y=%.3f", machine.x_mm, machine.y_mm);
+  return true;
+}
+
 HomingController::State HomingController::state() const { return state_; }
 
 const char* HomingController::stateName() const {
   switch (state_) {
     case State::Idle:
       return "Idle";
+    case State::Approach:
+      return "Approach";
     case State::SeekFastX:
       return "SeekFastX";
     case State::BackoffX:
@@ -342,6 +442,7 @@ bool HomingController::homeAxis(Axis axis, StepperBackendFastAccel& backend,
       }
 
       case State::Idle:
+      case State::Approach:
       case State::Complete:
       case State::Alarm:
         markAlarm("homing invalid state", safety, machine);
