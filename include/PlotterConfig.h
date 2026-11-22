@@ -429,7 +429,8 @@ constexpr bool HOMING_REQUIRE_HOMED_FOR_XY_MOVE = true;
 // limit switchの有効極性。
 // true: GPIO LOWでON。外付けpull-up + switchでGNDへ落とす配線。
 // false: GPIO HIGHでON。
-constexpr bool LIMIT_ACTIVE_LOW = true;
+// 2026-11-22(#22): 付け替えたCore2でtrueのとき台車の位置によらずX・Yとも常にONと読まれたため、falseへ。
+constexpr bool LIMIT_ACTIVE_LOW = false;
 
 // ============================================================================
 // LCD test mode

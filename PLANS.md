@@ -2794,6 +2794,15 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 - `ABORT`でのhold停止は、止まるまで待たずに戻る(従来どおり。JOGの`waitJogSettled()`に当たるものがない)。2400 counts/sからの減速の行き過ぎは計算上約580 counts。`ABORT`から約1秒以内に次の`SERVO_TURN`を送ると`idle_drift`になる可能性がある。移動量には依存しないが、長い移動の途中の`ABORT`を実機で確認するときに見る。
 - 1回の移動が長くなる分、`STOP`で止められない時間も長くなる(`SERVO_TURN`は`ABORT`でのみ中断)。
 
+## 2026-11-22: リミットスイッチの有効極性をHIGHへ(Issue #22)
+
+- [x] `LIMIT_ACTIVE_LOW` true → false。SPECのlimit switch表を更新
+- [ ] 実機: 押していないとき`LIMIT_STATUS`がOFF、押すとON
+- [ ] 実機: HOMEが完了する
+
+未解決リスク:
+
+- 前のCore2ではLowで正常だった。構成ごとに極性が違う理由(NO/NCの取り違え、pull-up/pull-downの違い)は未確認。前の構成に戻すとHOMEが動かない(押していないのにON、またはスイッチに当たっても止まらずmax travel alarm)。
 
 ## 2026-11-22: 待機中のずれの上限 (#23)
 
