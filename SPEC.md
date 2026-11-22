@@ -729,10 +729,11 @@ limit switch:
 
 | 信号 | GPIO | active |
 |---|---:|---|
-| X_LIMIT | 36 | Low |
-| Y_LIMIT | 35 | Low |
+| X_LIMIT | 36 | High |
+| Y_LIMIT | 35 | High |
 
-GPIO35/36は内部pull-upに頼らず、外付けpull-upを前提とする。
+GPIO35/36は内部pull-upに頼らず、外付けの抵抗を前提とする。
+有効極性は`LIMIT_ACTIVE_LOW`(`PlotterConfig.h`)。2026-11-22(#22)にtrue(Low)からfalse(High)へ変えた。付け替えたCore2で、Lowのとき台車の位置によらずX・Yとも常にONと読まれ、HOMEが開始時のbackoffの後`homing backoff limit still on`で止まったため。前のCore2では同じファームウェアのLowでHOMEが完了していた(配線・基板側の違いは未確認)。
 
 通常移動中、homing完了後の原点外位置でlimit activeが検出された場合はhard limit異常として扱う。
 ただし、瞬間的な入力ノイズで即alarmにしないため、debounce後に`HARD_LIMIT_UNEXPECTED_ALARM_MS`で指定した時間だけ継続してactiveの場合にalarmへ入る。
