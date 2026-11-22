@@ -1434,3 +1434,14 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - 機械的な脱調は別の問題として扱う。この変更は脱調の対策ではない。
 - 既知の制約(この変更の対象外、コードを読んで判明、実機未確認): `StepperBackendFastAccel::stop()`が呼ぶFastAccelStepper 2.0.0の`forceStop()`は、コマンド受付を止めるラッチを立ててramp generatorを止めるだけで、キューに積み済みのエントリは消さない。timed segmentはramp generatorを使わないので、`stop()`の後も積み済みの分(Bが低速のときは約0.1秒分、両軸が1セグメント1エントリのときは最大約0.6秒分)は動き続ける。リミット、アラーム、ABORT、キューエラーの停止がこれに当たる。別Issueで扱う。
 
+## 2026-11-20: SERVO_TURNの1回の上限をIDごとにし、ID 1を6回転へ(Issue #16)
+
+- 背景: チェーン延長でZの上下の幅が約3.59回転(1703〜16414 counts、2026-11-19実測)になった。1回の上限が3回転のため、ホストが3回転ずつに分けて送り、継ぎ目で一度止まっていた。
+- 1回の`SERVO_TURN`の上限は`stsMaxTurns(id)`(`PlotterConfig.h`)。ID 1(Zドラム)は`STS_Z_MAX_TURNS`=6、それ以外(ID 2 アーム/爪)は`STS_TEST_MAX_TURNS`=3のまま。爪は長い移動が不要なので上げない。
+- 超過は従来どおり動作前に`result=REJECTED reason=turns_over max=<上限>`(`max=`はそのIDの値)。`StsServoBus::moveRelative`の`reason=delta_out_of_range`も同じ上限を使う。
+- 追跡位置の上限`STS_TEST_ABS_LIMIT_COUNTS`=28000は不変。6回転 = 24576 countsは上限内(`static_assert`)。目標が上限を超える移動は従来どおり`reason=abs_out_of_range`。
+- timeoutは従来の式(移動量 ÷ 2400 counts/s + 2000ms)。6回転は計算上12.24s、実移動は加減速込みで約10.7sの見込み(3回転の実測5.6sから換算。実機未確認)。
+- hold check、runaway guard(50 counts)、読出し欠落(250ms)、`ABORT`でのhold停止は移動量に依存しないため変更なし。
+- `CONFIG`に`SERVO_LIMITS max_turns id1=6.0 id2=3.0 abs_limit_counts=28000 speed=2400`を追加。ホストはこの行で上限を知る。この行がないファームウェアはどのIDも3回転まで。先頭トークンを`SERVO_TURN`にしないのは、移動の結果行(`SERVO_TURN id=.. result=..`)と取り違えないため。
+- WebUI `Test`タブの入力上限もIDごと(ID 1は±6、ID 2は±3)。
+
