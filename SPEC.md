@@ -530,6 +530,7 @@ BackoffからSeekSlowへ移る条件は、対象limitのrawとdebouncedの両方
 HomingのSeekFast、Backoff、SeekSlowは短い固定距離moveの反復ではなく、各フェーズの上限距離ぶんの長いmoveを開始し、limit条件成立時にbackendを停止する。
 これにより`HOMING_SEEK_FEED_MM_MIN`と`HOMING_SLOW_FEED_MM_MIN`は、加速距離が足りる範囲で実効速度へ反映される。
 停止後のMachineStateはFastAccelStepperのA/B現在ステップ差分から更新する。
+`StepperBackendFastAccel`のランプ移動(`moveASteps`/`moveBSteps`/`moveABSteps`)は、止まっているときはFastAccelStepperのキューの最後の位置からの絶対移動(`moveTo`)で行う。FastAccelStepperの`move()`はランプ生成器の前回の目標に足すが、timed segment(`moveTimed()`)はその目標を更新しないため、G-codeの移動のあとに`move()`を使うと移動量がずれる(#20で発見)。動作中に呼ばれたときは`move()`のまま。
 通常XY/timed segment実行中も、FastAccelStepperの現在A/Bステップ差分からMachineStateのX/Y概算位置を更新しながらSafetyManagerをpollする。
 これにより、ブロック完了前でも原点から離れた位置でlimit activeが継続した場合にhard limit alarmへ入れる。
 XY batch完了時には、ジョブ開始、HOME、ZEROなどで揃えたbackend基準からの相対A/B stepとMachineStateの相対A/B stepを比較する。不一致があれば`WARN: DRIFT a=... b=...`をログし、timed segment部分投入や状態更新漏れの再発を検出する。

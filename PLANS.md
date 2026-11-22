@@ -2736,8 +2736,10 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 - [x] `CONFIG`に`HOMING fast_approach=.. margin=.. feed=..`
 - [x] チェック: `examples/home_fast_approach_check.csv`、`docs/home-fast-approach-check.md`
 - [x] `verify.sh` PASS(secret-scan、native、Python、m5stack-core2 / sim / hwtestビルド)
-- [ ] 書き込み・`SELFTEST`・チェックCSV(実機。ユーザー)
-- [ ] 中央からのHOMEの時間(見込み 約7〜8 s)と`before_zero`(脱調していないこと)
+- [x] 実機で発見(2026-11-22): G0で中央(195,100)へ動いた後のHOMEが`homing fast approach hit a limit (position off)`。FastAccelStepperの`move()`はランプ生成器の前回の目標に足すが、`moveTimed()`(G0/G1)はその目標を更新しない。HOME後のG0のあと、Aは-20400のはずが-44002 steps動いてXスイッチに当たった。`StepperBackendFastAccel`の`moveASteps`/`moveBSteps`/`moveABSteps`を、止まっているときはキューの最後の位置(`getPositionAfterCommandsCompleted()`)からの`moveTo()`にした(テストモーター移動`TEST_A`/`TEST_B`/`XY`系も同じ不具合があった)
+- [x] 実機: HOME → `G0 X195 Y100 F6000` → HOME で手前(20,20)まで動いてから原点探し、`before_zero` X=0.025 Y=-0.012。修正前は同じ手順で再現
+- [ ] `SELFTEST`・チェックCSV(実機)
+- [ ] 中央からのHOMEの時間(見込み 約7〜8 s)
 - [ ] 6000 mm/minで手前まで動くときに脱調しないこと(斜めの移動。ゲームのかんたんモードは9000で動いている)
 
 未解決リスク:
