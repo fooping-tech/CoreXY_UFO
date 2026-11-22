@@ -1,0 +1,49 @@
+command,delay_ms,expect,comment
+CONFIG,1500,MOTION steps_per_mm,"Record max_feed and soft limits (X 0..390, Y 0..200 expected)"
+TMC_INIT,1000,TMC_INIT,Initialize TMC2209 UART manager
+ZERO,500,ZERO,Forget any stale logical position before clearing alarm
+ALARM_CLEAR,500,ALARM_CLEAR complete,Clear any previous alarm before homing
+HOME,500,HOME complete,MACHINE MOVES: home before the diagonal moves
+POS,1000,HOMED=YES,Confirm HOME completed
+XY 46.325 101.338 3000,9500,"ACK_XY target=(46.325,101.338)",Go to the start of issue example 1
+XY 105.490 166.260 3000,3306,"ACK_XY target=(105.490,166.260)","Issue example 1 (A=9927 B=-461, B/A 0.046) at F3000"
+XY 46.325 101.338 3000,3306,"ACK_XY target=(46.325,101.338)",Back along the same line at F3000
+POS,700,HOMED=YES,No alarm after example 1 at F3000 (HOMED stays YES)
+XY 105.490 166.260 6000,2478,"ACK_XY target=(105.490,166.260)","Issue example 1 (A=9927 B=-461, B/A 0.046) at F6000"
+XY 46.325 101.338 6000,2478,"ACK_XY target=(46.325,101.338)",Back along the same line at F6000
+POS,700,HOMED=YES,No alarm after example 1 at F6000 (HOMED stays YES)
+XY 105.490 166.260 9000,2235,"ACK_XY target=(105.490,166.260)","Issue example 1 (A=9927 B=-461, B/A 0.046) at F9000"
+XY 46.325 101.338 9000,2235,"ACK_XY target=(46.325,101.338)",Back along the same line at F9000
+POS,700,HOMED=YES,No alarm after example 1 at F9000 (HOMED stays YES)
+XY 207.684 3.791 3000,5321,"ACK_XY target=(207.684,3.791)",Go to the start of issue example 2
+XY 384.840 174.660 3000,6472,"ACK_XY target=(384.840,174.660)","Issue example 2 (A=27842 B=503, B/A 0.018) at F3000"
+XY 207.684 3.791 3000,6472,"ACK_XY target=(207.684,3.791)",Back along the same line at F3000
+POS,700,HOMED=YES,No alarm after example 2 at F3000
+XY 384.840 174.660 9000,3290,"ACK_XY target=(384.840,174.660)","Issue example 2 (A=27842 B=503, B/A 0.018) at F9000"
+XY 207.684 3.791 9000,3290,"ACK_XY target=(207.684,3.791)",Back along the same line at F9000
+POS,700,HOMED=YES,No alarm after example 2 at F9000
+XY 384.840 174.660 15900,2693,"ACK_XY target=(384.840,174.660)","Issue example 2 (A=27842 B=503, B/A 0.018) at F15900"
+XY 207.684 3.791 15900,2693,"ACK_XY target=(207.684,3.791)",Back along the same line at F15900
+POS,700,HOMED=YES,No alarm after example 2 at F15900
+XY 50.000 20.000 3000,4720,"ACK_XY target=(50.000,20.000)",Go to the start of the exact 45 degree line
+XY 200.000 170.000 3000,5792,"ACK_XY target=(200.000,170.000)",Exact +X+Y diagonal (B=0) at F3000
+XY 50.000 20.000 3000,5792,"ACK_XY target=(50.000,20.000)",Back at F3000
+POS,700,HOMED=YES,No alarm after B=0 at F3000
+XY 200.000 170.000 9000,3064,"ACK_XY target=(200.000,170.000)",Exact +X+Y diagonal (B=0) at F9000
+XY 50.000 20.000 9000,3064,"ACK_XY target=(50.000,20.000)",Back at F9000
+POS,700,HOMED=YES,No alarm after B=0 at F9000
+XY 200.000 170.000 15900,2565,"ACK_XY target=(200.000,170.000)",Exact +X+Y diagonal (B=0) at F15900
+XY 50.000 20.000 15900,2565,"ACK_XY target=(50.000,20.000)",Back at F15900
+POS,700,HOMED=YES,No alarm after B=0 at F15900
+XY 50.000 170.000 3000,4550,"ACK_XY target=(50.000,170.000)",Go to the start of the other diagonal
+XY 200.000 20.000 3000,5792,"ACK_XY target=(200.000,20.000)",Exact +X-Y diagonal (A=0) at F3000
+XY 50.000 170.000 3000,5792,"ACK_XY target=(50.000,170.000)",Back at F3000
+POS,700,HOMED=YES,No alarm after A=0 at F3000
+XY 200.000 20.000 9000,3064,"ACK_XY target=(200.000,20.000)",Exact +X-Y diagonal (A=0) at F9000
+XY 50.000 170.000 9000,3064,"ACK_XY target=(50.000,170.000)",Back at F9000
+POS,700,HOMED=YES,No alarm after A=0 at F9000
+XY 200.000 20.000 15900,2565,"ACK_XY target=(200.000,20.000)",Exact +X-Y diagonal (A=0) at F15900
+XY 50.000 170.000 15900,2565,"ACK_XY target=(50.000,170.000)",Back at F15900
+POS,700,HOMED=YES,No alarm after A=0 at F15900
+XY 10.000 10.000 3000,4848,"ACK_XY target=(10.000,10.000)",Return near home
+POS,700,HOMED=YES,Final: HOMED=YES and no TIMED_SEGMENT_FAIL line in the log

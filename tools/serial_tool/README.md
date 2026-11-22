@@ -127,6 +127,7 @@ python tools/serial_tool/serial_send.py \
 | [LED Check](docs/led-check.md) | 現行STS3020構成では**無効**（GPIO33競合） | `examples/led_check.csv`（旧構成専用） |
 | [Atom JoyStick Check](docs/joystick-check.md) | Atom JoyStick(ESP-NOW)でXY・Z・アームを連続ジョグ(TEST_MODE不要) | `examples/joystick_check.csv` |
 | [Serial JOG / STOP Check](docs/jog-check.md) | PCからの速度ジョグ`JOG`(デッドマン、ソフトリミット減速)と非アラーム停止`STOP` | `examples/jog_check.csv`, `jog_check.py` |
+| [Timed Segment Diagonal Check](docs/timed-segment-diagonal-check.md) | 45°付近のXY直線移動(片側モーターがほぼ止まる)でキューエラーが出ないこと、`TIMED_SEGMENT_FAIL`診断行 | `examples/timed_segment_diagonal_check.csv` |
 | [Servo Power Cycle Check](docs/servo-power-cycle-check.md) | サーボだけ電源を入れ直した後の`SERVO_STATUS tracking=LOST`と、JOGでの多回転の再設定(`tracking=RESET`) | `examples/servo_power_cycle_check.csv`, `servo_power_cycle_check.py` |
 | [Servo Torque Limit Check](docs/servo-torque-limit-check.md) | 爪サーボ(ID 2)のトルク制限50%と、`SERVO_STATUS`の`torque_limit=`/`max_torque=` | `examples/servo_torque_limit_check.csv` |
 | [Servo Turn Limit Check](docs/servo-turn-limit-check.md) | `SERVO_TURN`の1回の上限(ID 1は6回転、ID 2は3回転)と`CONFIG`の`SERVO_LIMITS`行 | `examples/servo_turn_limit_check.csv`, `examples/servo_turn_limit_move_check.csv` |
