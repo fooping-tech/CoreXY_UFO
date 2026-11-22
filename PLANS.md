@@ -2794,3 +2794,9 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 - `ABORT`でのhold停止は、止まるまで待たずに戻る(従来どおり。JOGの`waitJogSettled()`に当たるものがない)。2400 counts/sからの減速の行き過ぎは計算上約580 counts。`ABORT`から約1秒以内に次の`SERVO_TURN`を送ると`idle_drift`になる可能性がある。移動量には依存しないが、長い移動の途中の`ABORT`を実機で確認するときに見る。
 - 1回の移動が長くなる分、`STOP`で止められない時間も長くなる(`SERVO_TURN`は`ABORT`でのみ中断)。
 
+
+## 2026-11-22: 待機中のずれの上限 (#23)
+
+- [x] `STS_IDLE_DRIFT_MAX_COUNTS`=256 を `moveRelative` と JOG 開始で使う。上限以内は追跡に取り込みログ1行
+- [x] `CONFIG` の `SERVO_LIMITS` に `idle_drift_max`
+- [ ] 実機: カプセルを握って運び、放せる(ゲームのかんたんモード)

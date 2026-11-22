@@ -205,6 +205,11 @@ constexpr float stsMaxTurns(uint8_t id) {
 constexpr int32_t STS_TEST_ABS_LIMIT_COUNTS = 28000;
 // 到達判定、poll周期、timeout余裕。
 constexpr int STS_TEST_TOLERANCE_COUNTS = 5;
+// 待機中(前回の追跡から次の移動まで)のずれの上限。これを超えたら回転数が分からなくなった
+// とみなして追跡を無効にする。2026-11-22(#23): 到達判定と同じ5 countsでは、カプセルを
+// 握って押さえている爪(トルク50%)のたわみ(実機で+6)で無効になっていた。256 counts(22.5°)は
+// 半回転2048より十分小さく、折り返しの取り違えは起きない。上限以内のずれは追跡に取り込む。
+constexpr int STS_IDLE_DRIFT_MAX_COUNTS = 256;
 constexpr uint32_t STS_TEST_POLL_INTERVAL_MS = 20;
 constexpr uint32_t STS_TEST_TIMEOUT_MARGIN_MS = 2000;
 // 折り返し補正はpoll間の移動が半回転未満の間だけ有効。読出し欠落がこの時間を超えたら

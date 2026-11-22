@@ -1451,3 +1451,12 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - `CONFIG`に`SERVO_LIMITS max_turns id1=6.0 id2=3.0 abs_limit_counts=28000 speed=2400`を追加。ホストはこの行で上限を知る。この行がないファームウェアはどのIDも3回転まで。先頭トークンを`SERVO_TURN`にしないのは、移動の結果行(`SERVO_TURN id=.. result=..`)と取り違えないため。
 - WebUI `Test`タブの入力上限もIDごと(ID 1は±6、ID 2は±3)。
 
+
+## 2026-11-22: サーボの待機中のずれの上限を到達判定と分ける(Issue #23)
+
+- 背景: ゲームのかんたんモードで、カプセルを握った爪(ID 2、トルク50%)が手前で止まって押さえたまま約12 s運ばれ、その間に+6 counts動いた。放す`SERVO_TURN 2`が`reason=idle_drift drift=+6 tracking=INVALID (power-cycle servo)`で断られ、サーボの電源を入れ直すまで動かせなくなった。
+- 待機中のずれ(前回の追跡から次の移動・JOG開始まで)の上限を`STS_IDLE_DRIFT_MAX_COUNTS`=256 counts(22.5°)にする。従来は到達判定と同じ`STS_TEST_TOLERANCE_COUNTS`=5。判定の目的は回転数が分からなくなったこと(半回転2048近くの飛び)の検出で、256は半回転より十分小さく折り返しを取り違えない。
+- 上限以内のずれは追跡に取り込んで続ける(従来どおり`updateTracking`)。5 countsを超えたときは`SERVO id=N idle_drift=+D accepted (max 256)`を1行出す。上限を超えたら従来どおり`tracking=INVALID`。
+- 対象は`StsServoBus::moveRelative`とJOG開始の2か所。到達判定・hold check・JOGの静止判定は5 countsのまま。
+- `CONFIG`の`SERVO_LIMITS`行に`idle_drift_max=256`。
+- 実機未確認。
