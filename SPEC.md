@@ -1412,3 +1412,15 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - ID 2(爪)は`STS_ARM_TORQUE_LIMIT`=500(50%)。ID 1(Z)は荷重を保持するため1000のまま。値は`stsTorqueLimit(id)`(`PlotterConfig.h`)。
 - 書き込みはRAMのみで、torque ONの直前(`holdAndVerify()`と`moveSingleTurn()`)に毎回行う。EEPROMはlockのままで最大トルクは変えない。サーボ電源再投入でRAMは1000へ戻るが、次の`SERVO_TURN`/`SERVO_ANGLE`/JOGの開始時に書き直す。書き込みに失敗したらtorque ONしない(`reason=hold_write_failed`)。
 - 起動時は従来どおり書かない(UART初期化とPINGのみ)。そのため、電源投入から最初の動作までは`SERVO_STATUS`が`torque_limit=1000`を返す。
+
+## 2026-11-20: SERVO_TURNの1回の上限をIDごとにし、ID 1を6回転へ(Issue #16)
+
+- 背景: チェーン延長でZの上下の幅が約3.59回転(1703〜16414 counts、2026-11-19実測)になった。1回の上限が3回転のため、ホストが3回転ずつに分けて送り、継ぎ目で一度止まっていた。
+- 1回の`SERVO_TURN`の上限は`stsMaxTurns(id)`(`PlotterConfig.h`)。ID 1(Zドラム)は`STS_Z_MAX_TURNS`=6、それ以外(ID 2 アーム/爪)は`STS_TEST_MAX_TURNS`=3のまま。爪は長い移動が不要なので上げない。
+- 超過は従来どおり動作前に`result=REJECTED reason=turns_over max=<上限>`(`max=`はそのIDの値)。`StsServoBus::moveRelative`の`reason=delta_out_of_range`も同じ上限を使う。
+- 追跡位置の上限`STS_TEST_ABS_LIMIT_COUNTS`=28000は不変。6回転 = 24576 countsは上限内(`static_assert`)。目標が上限を超える移動は従来どおり`reason=abs_out_of_range`。
+- timeoutは従来の式(移動量 ÷ 2400 counts/s + 2000ms)。6回転は計算上12.24s、実移動は加減速込みで約10.7sの見込み(3回転の実測5.6sから換算。実機未確認)。
+- hold check、runaway guard(50 counts)、読出し欠落(250ms)、`ABORT`でのhold停止は移動量に依存しないため変更なし。
+- `CONFIG`に`SERVO_LIMITS max_turns id1=6.0 id2=3.0 abs_limit_counts=28000 speed=2400`を追加。ホストはこの行で上限を知る。この行がないファームウェアはどのIDも3回転まで。先頭トークンを`SERVO_TURN`にしないのは、移動の結果行(`SERVO_TURN id=.. result=..`)と取り違えないため。
+- WebUI `Test`タブの入力上限もIDごと(ID 1は±6、ID 2は±3)。
+

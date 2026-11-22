@@ -194,7 +194,14 @@ constexpr uint16_t stsTorqueLimit(uint8_t id) {
 constexpr uint16_t STS_TEST_SPEED_COUNTS_PER_S = 2400;
 constexpr uint8_t STS_TEST_ACC = 50;
 // 1回のSERVO_TURN上限 [turn]と、追跡位置の上限(サーボの多回転goal +/-30719内)。
+// 2026-11-20: ID 1(Zドラム)だけ3から6へ(Issue #16)。チェーン延長で上下の幅が
+// 約3.59回転になり、3回転ずつの分割の継ぎ目で止まっていた。ID 2(アーム/爪)は3のまま。
 constexpr float STS_TEST_MAX_TURNS = 3.0f;
+constexpr uint8_t STS_Z_SERVO_ID = 1;
+constexpr float STS_Z_MAX_TURNS = 6.0f;
+constexpr float stsMaxTurns(uint8_t id) {
+  return id == STS_Z_SERVO_ID ? STS_Z_MAX_TURNS : STS_TEST_MAX_TURNS;
+}
 constexpr int32_t STS_TEST_ABS_LIMIT_COUNTS = 28000;
 // 到達判定、poll周期、timeout余裕。
 constexpr int STS_TEST_TOLERANCE_COUNTS = 5;
@@ -216,6 +223,8 @@ static_assert(static_cast<uint32_t>(STS_TEST_SPEED_COUNTS_PER_S) * STS_TEST_MAX_
               "servo must move less than a quarter turn within STS_TEST_MAX_READ_GAP_MS");
 static_assert(STS_TEST_MAX_TURNS * STS_COUNTS_PER_TURN < STS_TEST_ABS_LIMIT_COUNTS,
               "STS_TEST_MAX_TURNS must fit inside STS_TEST_ABS_LIMIT_COUNTS");
+static_assert(STS_Z_MAX_TURNS * STS_COUNTS_PER_TURN < STS_TEST_ABS_LIMIT_COUNTS,
+              "STS_Z_MAX_TURNS must fit inside STS_TEST_ABS_LIMIT_COUNTS");
 
 // ============================================================================
 // Test mode XY / motor moves (no homing)

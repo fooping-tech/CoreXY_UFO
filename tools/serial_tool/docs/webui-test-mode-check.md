@@ -29,7 +29,7 @@ python tools/webui/server.py
 | Limits | `POS`を1.5秒ごとに取得し、X/Yのdebounced値(ON/OFF)とraw入力を表示 |
 | Motors | `TEST_A/TEST_B <±80/400/1600> 600`。A+ = +X+Y、B+ = +X-Y |
 | X / Y Move | `TEST_JOG <dx> <dy> 600`。1/5/10/50mm。-X/-Yがリミット方向 |
-| Serial Servo ID1/ID2 | `SERVO_STATUS`、`SERVO_ANGLE <id> <deg>`(最短経路)、`SERVO_TURN <id> <turns>`(±3回転まで、+が時計回り)、`SERVO_OFF` |
+| Serial Servo ID1/ID2 | `SERVO_STATUS`、`SERVO_ANGLE <id> <deg>`(最短経路)、`SERVO_TURN <id> <turns>`(ID 1は±6回転、ID 2は±3回転まで、+が時計回り)、`SERVO_OFF` |
 
 動作ボタンはテストモードON・接続中・他のテストコマンド非実行中・alarmなしのときだけ有効。
 
@@ -55,7 +55,7 @@ python tools/webui/server.py
 7. Xスイッチを押したまま`-X` → `result=REJECTED reason=x_limit_active_toward_limit`
 8. Motors: `80`で`A+`、`B+`、`A-`、`B-`の方向を確認
 9. Servo ID1: `STATUS` → `limits=0/4095`、`+1/4` → `SERVO_TURN ... result=PASS`、`-1/4`で戻る
-10. Servo ID1: `Turns 3`で`ROTATE`(右3回転、約6s)、`-3`で戻る
+10. Servo ID1: `Turns 3`で`ROTATE`(右3回転、約6s)、`-3`で戻る(ID 1は±6まで入力できる)
 11. Servo ID2: `Angle 180`で`MOVE TO ANGLE` → `SERVO_ANGLE ... result=PASS`
 12. `STOP`を移動中に押す → 停止、`ALARM`。`CLEAR ALARM`で復帰
 13. `EXIT TEST MODE`、`Control`で`HOME`

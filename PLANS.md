@@ -2718,11 +2718,30 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 - [x] `verify.sh` PASS(secret-scan、native、Python、m5stack-core2 / sim / hwtestビルド)
 - [x] 書き込み、起動ログ(ID 1/2 ping=OK)、`SERVO_STATUS 1/2`応答
 - [x] チェック: `examples/servo_torque_limit_check.csv`、`docs/servo-torque-limit-check.md`(Codexレビュー P1)。`--dry-run`のみ実施
-- [ ] 実機でID 2を動かした後に`torque_limit=500`となること(ユーザー判断で今回は動かしていない)
-- [ ] サーボ電源再投入 → 次の動作で500へ戻ること
+- [x] 実機でID 2を動かした後に`torque_limit=500`となること(2026-11-19、ユーザーが実機で確認済みと報告。測定ログは残っていない)
+- [x] サーボ電源再投入 → 次の動作で500へ戻ること(同上)
 - [ ] 50%で爪の把持力が足りるか
 
 未解決リスク:
 
 - 電源投入から最初の動作までは100%のまま(その間torqueはOFF)。
 - 50%は暫定値。把持力が足りなければ`STS_ARM_TORQUE_LIMIT`を調整する。
+
+## 2026-11-20: SERVO_TURNの1回の上限(Issue #16)
+
+- [x] `stsMaxTurns(id)`: ID 1 = 6回転、ID 2 = 3回転。`handleServoMove`(`turns_over`)と`moveRelative`(`delta_out_of_range`)の両方に適用
+- [x] `CONFIG`に`SERVO_LIMITS max_turns id1=.. id2=.. abs_limit_counts=.. speed=..`
+- [x] WebUI `Test`タブの入力上限をIDごとに
+- [x] チェック: `examples/servo_turn_limit_check.csv`(動かさない)、`examples/servo_turn_limit_move_check.csv`(Zが3.55回転動く)、`docs/servo-turn-limit-check.md`
+- [x] `verify.sh` PASS
+- [ ] 書き込み、SELFTEST、`servo_turn_limit_check.csv`(2026-11-20: デバイス未接続のため未実施)
+- [ ] 実機: `SERVO_TURN 1 3.55`(校正済みの上下の幅14711 countsの内側)が1回で通り、途中で止まらない
+- [ ] 実機: 長い移動の途中の`ABORT`でhold停止する
+- [ ] ホスト側(CoreXY_UFO_Game): `MAX_TURNS_PER_COMMAND`を`CONFIG`の値で切り替える、`FakeFirmware`の`turns_over`
+
+未解決リスク:
+
+- 6回転の所要時間とtimeout余裕(計算上1.5s)は実機未確認。余裕は移動量によらず一定なので、許容できる速度低下は3回転の約23%から6回転では約13%に減る。`TIMEOUT`のときはtorque ONのままgoalも有効で、サーボは追跡なしで動き続ける(従来どおり)。その後の`SERVO_TURN`は`idle_drift`で追跡無効になる。負荷付きで`TIMEOUT`が出る場合は`STS_TEST_TIMEOUT_MARGIN_MS`を見直す。
+- `ABORT`でのhold停止は、止まるまで待たずに戻る(従来どおり。JOGの`waitJogSettled()`に当たるものがない)。2400 counts/sからの減速の行き過ぎは計算上約580 counts。`ABORT`から約1秒以内に次の`SERVO_TURN`を送ると`idle_drift`になる可能性がある。移動量には依存しないが、長い移動の途中の`ABORT`を実機で確認するときに見る。
+- 1回の移動が長くなる分、`STOP`で止められない時間も長くなる(`SERVO_TURN`は`ABORT`でのみ中断)。
+
