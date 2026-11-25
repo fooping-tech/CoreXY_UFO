@@ -371,9 +371,12 @@ bool HomingController::homeAxis(Axis axis, StepperBackendFastAccel& backend,
           setState(backoff, machine, "LIMIT_PRESSED_SEEK_FAST_TO_BACKOFF");
           break;
         }
+        // #26: the single pass's zero is this touch: a debounced one (not a raw glitch)
         if (!moveUntilCondition(axis, seek_dir, maxTravelForAxis(axis),
                                 HOMING_SEEK_FEED_MM_MIN,
-                                MoveStopCondition::TargetAnyActive, backend,
+                                HOMING_SINGLE_PASS ? MoveStopCondition::TargetDebouncedActive
+                                                   : MoveStopCondition::TargetAnyActive,
+                                backend,
                                 safety, machine, other_limit_allowed_active,
                                 stop_condition_met)) {
           return false;
@@ -382,13 +385,18 @@ bool HomingController::homeAxis(Axis axis, StepperBackendFastAccel& backend,
           markAlarm("homing seek fast max travel", safety, machine);
           return false;
         }
+        if (HOMING_SINGLE_PASS) {
+          // #26: the first touch is the zero (no backoff, no slow seek)
+          setState(set_zero, machine, "LIMIT_PRESSED_SEEK_FAST_TO_SET_ZERO");
+          break;
+        }
         setState(backoff, machine, "LIMIT_PRESSED_SEEK_FAST_TO_BACKOFF");
         break;
 
       case State::BackoffX:
       case State::BackoffY:
         if (!targetLimitAnyActive(axis, safety)) {
-          setState(seek_slow, machine, "BACKOFF_LIMIT_RELEASED");
+          setState(HOMING_SINGLE_PASS ? seek_fast : seek_slow, machine, "BACKOFF_LIMIT_RELEASED");
           break;
         }
         if (!moveUntilCondition(axis, -seek_dir, backoff_limit_mm,
@@ -402,7 +410,8 @@ bool HomingController::homeAxis(Axis axis, StepperBackendFastAccel& backend,
           markAlarm("homing backoff limit still on", safety, machine);
           return false;
         }
-        setState(seek_slow, machine, "BACKOFF_LIMIT_RELEASED");
+        // #26: single pass: only the limit ON at the start backs off; then one fast touch
+        setState(HOMING_SINGLE_PASS ? seek_fast : seek_slow, machine, "BACKOFF_LIMIT_RELEASED");
         break;
 
       case State::SeekSlowX:

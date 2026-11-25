@@ -369,6 +369,13 @@ constexpr float HOMING_SEEK_FEED_MM_MIN = 1200.0f;
 // 決め方: 原点再現性を優先して低くする。
 constexpr float HOMING_SLOW_FEED_MM_MIN = 60.0f;
 
+// trueなら原点を1回の当たりで決める(#26)。fast seekでlimitへ当たったら、その場を0点にする
+// (backoffとslow seekをしない)。開始時からlimitがONのときだけ、HOMING_START_BACKOFF_MMまで
+// 逃げてからfast seekで1回当てる。原点の再現性はslow seekより落ちる(fast seekの停止の分)。
+// 決め方: 2026-11-25 リミットスイッチを交換したら8 mmのbackoffでOFFへ戻らず原点を取れなかった。
+// 今の用途ではslow seekほどの精度は要らない。falseで今までどおり(fast→backoff→slow)。
+constexpr bool HOMING_SINGLE_PASS = true;
+
 // 通常homing中にlimitへ当たった後、いったん逃げる距離 [mm]。
 // 決め方: switchが確実にOFFへ戻る距離より大きくする。
 constexpr float HOMING_BACKOFF_MM = 8.0f;
@@ -420,7 +427,9 @@ constexpr uint32_t HARD_LIMIT_UNEXPECTED_ALARM_MS = 80;
 // limitがOFFへ戻るまで許す最大移動距離 [mm]。
 // これを超えてもOFFにならない場合はswitchが戻っていない、配線が短絡している、
 // または移動方向が想定と違う可能性があるためalarmにする。
-constexpr float NORMAL_MOVE_LIMIT_RELEASE_MM = 8.0f;
+// 2026-11-25(#26): 交換したスイッチは8 mmではOFFへ戻らず、HOMING_SINGLE_PASSでは0点でlimitが
+// ONのままなので、原点から離れる最初の移動のために20 mmへ。
+constexpr float NORMAL_MOVE_LIMIT_RELEASE_MM = 20.0f;
 
 // trueならhoming完了前の通常XY移動を拒否する。
 // 実機安全のためtrue推奨。ZEROはhoming扱いにしない。
