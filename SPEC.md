@@ -525,6 +525,7 @@ HOMEを扱うserial check CSVでは、原則として`ZERO -> ALARM_CLEAR -> HOM
 そのあとは今までどおりX→Yの順にSeekFast→Backoff→SeekSlow。HOMEDでないとき(電源投入後、`ZERO`、ABORT、TMCリセットなどでHOMEDが外れたとき)、アラーム中、開始時にlimitがONのときは行わない。
 モータのENはGND直結で常に通電しているため、HOMEDの間は手で押されても論理座標はずれない(脱調の疑いがあるときはSPECのとおり`ZERO`でHOMEDを破棄してから`HOME`する)。
 手前への移動中にlimitのrawがON、アラーム、ABORTのときは止めてアラームにし、HOMEDを外す(位置がずれていた)。`HOME_X`・`HOME_Y`は対象外。
+#26: `HOMING_SINGLE_PASS`(既定true)のときは、SeekFastで対象limitのdebouncedがONになった所をそのまま0点にする(BackoffとSeekSlowをしない)。開始時からlimitがONのときだけ、Backoff(`HOMING_START_BACKOFF_MM`)で離れてからSeekFastで1回当てる。0点ではlimitがONのままなので、原点から離れる通常移動のlimit解放の許容`NORMAL_MOVE_LIMIT_RELEASE_MM`を20 mmにした(交換したスイッチは8 mmではOFFへ戻らない)。原点の再現性はSeekSlowより落ちる。falseなら以下のとおり。
 HOME開始時またはSeekFast中に対象limitのrawまたはdebouncedがONなら、seek方向へ押し込まず即Backoffへ入る。
 BackoffからSeekSlowへ移る条件は、対象limitのrawとdebouncedの両方がOFFになることとする。
 HomingのSeekFast、Backoff、SeekSlowは短い固定距離moveの反復ではなく、各フェーズの上限距離ぶんの長いmoveを開始し、limit条件成立時にbackendを停止する。

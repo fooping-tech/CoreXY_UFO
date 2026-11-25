@@ -83,13 +83,13 @@ void Diagnostics::printConfig() {
   logMessage("JOB_END park_enabled=%u park=(%.3f,%.3f) park_feed=%.3f jingle_enabled=%u",
              JOB_END_PARK_ENABLED, JOB_END_PARK_X_MM, JOB_END_PARK_Y_MM,
              JOB_END_PARK_FEED_MM_MIN, JOB_END_JINGLE_ENABLED);
-  logMessage("HOMING enabled=%u require_homed_xy=%u x_dir=%d y_dir=%d seek=%.3f slow=%.3f backoff=%.3f start_backoff=%.3f maxX=%.3f maxY=%.3f debounce=%lums hard_limit_ms=%lums release=%.3f active=%s",
+  logMessage("HOMING enabled=%u require_homed_xy=%u x_dir=%d y_dir=%d seek=%.3f slow=%.3f backoff=%.3f start_backoff=%.3f maxX=%.3f maxY=%.3f debounce=%lums hard_limit_ms=%lums release=%.3f active=%s single_pass=%u",
              HOMING_ENABLED, HOMING_REQUIRE_HOMED_FOR_XY_MOVE, HOMING_X_DIR,
              HOMING_Y_DIR, HOMING_SEEK_FEED_MM_MIN, HOMING_SLOW_FEED_MM_MIN,
              HOMING_BACKOFF_MM, HOMING_START_BACKOFF_MM, HOMING_MAX_TRAVEL_X_MM,
              HOMING_MAX_TRAVEL_Y_MM, HOMING_LIMIT_DEBOUNCE_MS,
              HARD_LIMIT_UNEXPECTED_ALARM_MS, NORMAL_MOVE_LIMIT_RELEASE_MM,
-             LIMIT_ACTIVE_LOW ? "LOW" : "HIGH");
+             LIMIT_ACTIVE_LOW ? "LOW" : "HIGH", HOMING_SINGLE_PASS);
   logMessage("HOMING fast_approach=%u margin=%.3f feed=%.3f",
              HOMING_FAST_APPROACH_ENABLED, HOMING_FAST_APPROACH_MARGIN_MM,
              HOMING_FAST_APPROACH_FEED_MM_MIN);
