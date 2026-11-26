@@ -7,6 +7,7 @@
 #include <string.h>
 #include "Core2PinMap.h"
 #include "PlotterConfig.h"
+#include "StsTurnRecovery.h"
 
 // (the main firmware and the hwtest build each define it)
 void logMessage(const char* format, ...);
@@ -15,7 +16,21 @@ namespace {
 // Dedicated UART1. UART2 is reserved for the TMC2209 bus.
 // The external adapter provides the required half-duplex TTL direction control.
 HardwareSerial servo_uart(1);
-SMS_STS servo;
+
+// #30: FTServo empties the receive buffer before every command with
+// `while (read() != -1);`, which never returns while data keeps arriving (noise
+// on the line). Bounded here, so a read under noise fails at once instead of
+// blocking the move loop (and abort checks) for seconds.
+class BoundedSmsSts : public SMS_STS {
+ public:
+  void rFlushSCS() override {
+    const uint32_t from = micros();
+    while (pSerial->read() != -1) {
+      if (micros() - from > STS_RX_FLUSH_MAX_US) break;
+    }
+  }
+};
+BoundedSmsSts servo;
 
 constexpr uint8_t REG_LOCK_LOCKED = 1;
 // EEPROM max torque [0.1 %]; not defined by the FTServo library.
@@ -475,8 +490,10 @@ bool StsServoBus::enableTracking(uint8_t id, char* detail, size_t detail_size) {
     // last goal within the turn. A whole-turn mismatch (shaft turned a full
     // turn by hand while torque was off) is caught by the hold check before
     // any goal moves; it stops the servo within ~200 ms.
+    // #30: a servo that stopped short of its goal (a gripped capsule, a block) is still at a
+    // known turn while it is within STS_FEEDBACK_RECOVER_MAX_COUNTS (well under half a turn).
     const int offset = wrapDeltaCounts(raw_counts - floorModTurn(goal_counts));
-    if (moving != 0 || abs(offset) > STS_TEST_TOLERANCE_COUNTS) {
+    if (moving != 0 || abs(offset) > STS_FEEDBACK_RECOVER_MAX_COUNTS) {
       snprintf(detail, detail_size,
                "reason=unknown_turn_count torque=%d moving=%d goal=%ld raw=%d "
                "(power-cycle servo)",
@@ -628,9 +645,12 @@ StsMoveResult StsServoBus::moveRelative(uint8_t id, int32_t delta_counts,
         snprintf(detail, detail_size,
                  "target=%ld reason=feedback_lost tracking=INVALID",
                  static_cast<long>(target_counts));
-        move_diag.report(StsMoveResult::FAILED);
-        move_diag.afterLoss();
-        return StsMoveResult::FAILED;
+        // #30: the servo may only be unheard (noise on the reply line): wait for it
+        const StsMoveResult recovered = recoverLostFeedback(
+            id, target_counts, abort_requested, started_ms, last_good_read_ms, detail, detail_size);
+        move_diag.report(recovered);
+        if (recovered == StsMoveResult::FAILED) move_diag.afterLoss();
+        return recovered;
       }
       continue;
     }
@@ -663,6 +683,102 @@ StsMoveResult StsServoBus::moveRelative(uint8_t id, int32_t delta_counts,
            static_cast<unsigned long>(timeout_ms));
   move_diag.report(StsMoveResult::TIMEOUT);
   return StsMoveResult::TIMEOUT;
+#endif
+}
+
+StsMoveResult StsServoBus::recoverLostFeedback(uint8_t id, int32_t target_counts,
+                                               bool (*abort_requested)(),
+                                               uint32_t move_started_ms,
+                                               uint32_t last_good_read_ms, char* detail,
+                                               size_t detail_size) {
+#if SIMULATION_MODE
+  (void)last_good_read_ms;
+  (void)id;
+  (void)target_counts;
+  (void)abort_requested;
+  (void)move_started_ms;
+  snprintf(detail, detail_size, "reason=feedback_lost tracking=INVALID");
+  return StsMoveResult::FAILED;
+#else
+  Track& state = track(id);
+  const int32_t last_abs = state.abs_counts;  // the last count heard
+  state.valid = false;  // until the turn count is taken back
+  const uint32_t lost_ms = millis();
+  const char* why = "no_reply";
+  int raw = -1;
+  int32_t goal = 0;
+  int moving = -1;
+  while (millis() - lost_ms < STS_FEEDBACK_RECOVER_WAIT_MS) {
+    if (abort_requested != nullptr && abort_requested()) {
+      // No hold is written: the last tracked count is stale, and holding there could
+      // turn the servo back (by up to a turn). It goes on to its goal, as before #30.
+      snprintf(detail, detail_size,
+               "target=%ld reason=abort feedback_lost tracking=INVALID",
+               static_cast<long>(target_counts));
+      return StsMoveResult::ABORTED;
+    }
+    delay(STS_TEST_POLL_INTERVAL_MS);
+    int min_limit = -1;
+    int max_limit = -1;
+    if (!readAngleLimits(id, min_limit, max_limit)) {
+      why = "no_reply";
+      continue;
+    }
+    if (min_limit != 0 || max_limit != 0) {
+      why = "multi_turn_lost";  // restarted: the count is gone for good
+      break;
+    }
+    if (!readGoalCounts(id, goal) || !readRawPosition(id, raw) ||
+        !readByteOk(id, SMS_STS_MOVING, moving)) {
+      why = "no_reply";
+      continue;
+    }
+    if (goal != target_counts) {
+      why = "goal_changed";
+      break;
+    }
+    if (moving != 0) {
+      why = "still_moving";  // answering, but the turn may still change: wait for the stop
+      continue;
+    }
+    // review on #31: the angle alone does not tell the turn on a multi-turn move. Every count
+    // with this angle that lies on the path from the last count heard to the target, and that
+    // the servo could have reached since, is a candidate: only one = known.
+    const int32_t reach =
+        static_cast<int32_t>(static_cast<uint32_t>(STS_TEST_SPEED_COUNTS_PER_S) *
+                             (millis() - last_good_read_ms) / 1000U) +
+        STS_TEST_RUNAWAY_MARGIN_COUNTS;
+    const StsTurnRecovery turn =
+        stsRecoverTurn(last_abs, target_counts, raw, reach, STS_FEEDBACK_RECOVER_MAX_COUNTS,
+                       STS_COUNTS_PER_TURN);
+    if (!turn.known) {
+      why = turn.candidates == 0 ? "off_the_path" : "ambiguous_turn";
+      break;
+    }
+    const int32_t diff = turn.abs_counts - target_counts;
+    state.abs_counts = turn.abs_counts;
+    state.last_raw_counts = raw;
+    state.valid = true;
+    const unsigned long gap_ms = millis() - lost_ms + STS_TEST_MAX_READ_GAP_MS;
+    logMessage("SERVO id=%u feedback recovered after ~%lums raw=%d goal=%ld abs=%ld", id, gap_ms,
+               raw, static_cast<long>(target_counts), static_cast<long>(state.abs_counts));
+    if (labs(diff) <= STS_TEST_TOLERANCE_COUNTS) {
+      snprintf(detail, detail_size, "target=%ld actual=%ld error=%+ld ms=%lu recovered=YES gap_ms=%lu",
+               static_cast<long>(target_counts), static_cast<long>(state.abs_counts),
+               static_cast<long>(diff),
+               static_cast<unsigned long>(millis() - move_started_ms), gap_ms);
+      return StsMoveResult::PASS;
+    }
+    // stopped short (a grip, a block): reported as a normal stall
+    snprintf(detail, detail_size, "target=%ld actual=%ld ms=%lu torque=ON recovered=YES gap_ms=%lu",
+             static_cast<long>(target_counts), static_cast<long>(state.abs_counts),
+             static_cast<unsigned long>(millis() - move_started_ms), gap_ms);
+    return StsMoveResult::TIMEOUT;
+  }
+  snprintf(detail, detail_size,
+           "target=%ld reason=feedback_lost tracking=INVALID recover=%s raw=%d goal=%ld moving=%d",
+           static_cast<long>(target_counts), why, raw, static_cast<long>(goal), moving);
+  return StsMoveResult::FAILED;
 #endif
 }
 

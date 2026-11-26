@@ -2361,6 +2361,7 @@ Phase 6.9を実装してください。
 | 2026-06-14 | Fun MazeのS/G文字も個別`line`から連続`polyline`へ変更し、Hard maze変換結果を4 strokes（壁2、S、G）へ削減。SVG to G-codeのstroke間に出ていた重複`M5`も除去 | Codex |
 | 2026-10-04 | コントローラPCB検査用`m5stack-core2-hwtest` envを追加。limit安定性、TMC2209 UART/IOIN/GSTAT/DRV_STATUS、STEP/DIR→IOINループバック、単独MOTOR、servo、NEOPIXEL、AXP192電源表示をSerial/LCDで検査。`TMC2209Manager`/`PenController`へ診断APIを追加。実機確認は未実施(R40/R41) | Claude |
 | 2026-11-26 | サーボの移動中の電圧・電流・状態の記録(`SDIAG`、Issue #28)を追加 | Claude |
+| 2026-11-26 | サーボの受信の雑音からの取り戻し(`rFlushSCS`の上限、`recoverLostFeedback`、`StsTurnRecovery.h`、Issue #30)を追加 | Claude |
 
 ---
 
@@ -2819,4 +2820,16 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 - [x] `tools/serial_tool/examples/servo_diag_check.csv`、`docs/servo-diag-check.md`
 - [x] 実機: 通常の開閉で `SDIAG` が出る(7.3〜7.6 V、失敗なし)。Dial の上の失敗で電源ではないと判定(受信線へのデータの流れ込み、原因はミスト)
 - [ ] 調査が終わったら、この記録を残すか外すかを決める(1 poll につき 1 回の読出しが増える)
+
+## 2026-11-26: 受信の雑音からの取り戻し (#30)
+
+- [x] `BoundedSmsSts`: `rFlushSCS()` を 2 ms で打ち切る
+- [x] `recoverLostFeedback`: 最大 5 s 待ち、候補がちょうど 1 つなら追跡を取り戻す(`StsTurnRecovery.h`)
+- [x] native テスト `test/native/test_sts_turn_recovery.cpp`(実機の爪の開き、1 回転手前の停止は不定、届く範囲、負の値、道のりの外)
+- [x] 取り戻しの最中の ABORT は hold を書かない
+- [x] `enableTracking` の多回転の再設定の許容を 256 counts に
+- [x] `tools/serial_tool/examples/servo_feedback_recover_check.csv`、`docs/servo-feedback-recover-check.md`
+- [x] 実機: ミストの雑音で 4.5 s 途切れた爪の開きが `recovered=YES` で PASS
+- [ ] 実機: 候補の判定(レビュー #31 の修正)と、手前で止まった爪の再設定
+- [ ] 5 s を超える雑音(ミストでは約 15 s)は従来どおり失敗する。雑音そのものはハードウェアで対策する(R42)
 

@@ -22,3 +22,9 @@ c++ -std=c++17 -DSIMULATION_MODE=1 \
   -o /tmp/corexy_plotter_native_timed_segment_tests
 
 /tmp/corexy_plotter_native_timed_segment_tests
+
+c++ -std=c++17 -Iinclude -Itest/native \
+  test/native/test_sts_turn_recovery.cpp \
+  -o /tmp/corexy_plotter_native_sts_turn_recovery_tests
+
+/tmp/corexy_plotter_native_sts_turn_recovery_tests

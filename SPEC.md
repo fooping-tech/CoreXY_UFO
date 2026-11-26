@@ -1475,3 +1475,19 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
   - `feedback_lost`のあと: 最大 1.5 s Ping し、戻ったら`SDIAG_AFTER id= back=YES back_ms= pings= torque= torque_limit= limits= mode= voltage= restarted=YES|NO`、戻らなければ`back=NO waited_ms= pings= last_err=`。restarted は、角度リミットが 0/4095 に戻ったか、トルク上限が`stsTorqueLimit(id)`と違うとき YES(どちらもサーボの電源投入で戻る)。この待ちのぶん、`feedback_lost`の結果は最大 1.5 s 遅れる(サーボはもともと応答していない)。
 - 実機結果(2026-11-26): 失敗の直前まで電圧 7.4〜7.6 V、電流は小さく、状態バイトは 0、サーボは再起動していない(`restarted=NO`)。0.65 s 以降は 1 回の読出しが 2.2 s 戻らず(FTServo の`rFlushSCS()`はデータが届き続ける間戻らない)、返ってきたのは ID 違い(ERR3)。電源ではなく受信線へのデータの流れ込み。原因はイルミネーションのミスト(ユーザーがミストを電気的に切って確認)。対策は Issue #30。
 
+## 2026-11-26: 受信に雑音が入っても、通信が戻ったらサーボの回転の数を取り戻す(Issue #30)
+
+- 背景: #28 の記録で、爪の`feedback_lost`は受信線(GPIO33)にデータが流れ込み続けたためと分かった(原因はイルミネーションのミスト。1 回で約 3〜15 秒)。サーボ自身は止まらずに目標まで動いていた。
+- **受信バッファを空にする処理に上限**: FTServo の`rFlushSCS()`(`while(read()!=-1);`)は、データが届き続ける間戻らない。`SMS_STS`を継承した`BoundedSmsSts`で上書きし、`STS_RX_FLUSH_MAX_US`(2 ms)で打ち切る。雑音の間も 1 回の読出しはすぐ失敗として返り、`abort_requested`の確認が止まらない。
+- **取り戻し**(`StsServoBus::recoverLostFeedback`): `moveRelative`で読出し欠落が`STS_TEST_MAX_READ_GAP_MS`(250 ms)を超えたら、すぐ失敗にせず最大`STS_FEEDBACK_RECOVER_WAIT_MS`(5 s)、20 ms ごとにサーボを読む。次がそろえば追跡を取り戻す。
+  - 角度リミットが 0/0(再起動していない。0/4095 なら`recover=multi_turn_lost`で失敗)
+  - Goal Position が命令した target と同じ(違えば`goal_changed`)
+  - 停止中(`moving=0`。動いている間は待ち続ける)
+  - いまの角度を持つ位置(raw + k 回転)のうち、「最後に読めた位置から target までの道のり(前後に`STS_FEEDBACK_RECOVER_MAX_COUNTS`=256)」にあって、最後に読めてから最高速(2400 counts/s)+ runaway の余裕で届くものが**ちょうど 1 つ**(`StsTurnRecovery.h`、native テストあり)。0 個なら`off_the_path`、2 個以上なら`ambiguous_turn`で失敗。多回転の途中で target と同じ角度の 1 回転手前に止まった場合は 2 個になるので取り戻さない(レビュー #31)。
+  - 取り戻せたら`SERVO id=N feedback recovered after ~Nms raw= goal= abs=`を出し、target との差が 5 counts 以内なら`PASS`、それより大きければ`TIMEOUT torque=ON`(握ったときと同じ形)。どちらも結果に`recovered=YES gap_ms=`。
+  - 取り戻せなければ従来どおり`FAILED reason=feedback_lost tracking=INVALID`に`recover=<理由> raw= goal= moving=`を付ける。
+- **取り戻しの最中の`ABORT`**: `result=ABORTED reason=abort feedback_lost tracking=INVALID`を返し、**hold の位置は書かない**。最後に読めた位置は古く、そこへ hold すると最大 1 回転逆に回るおそれがあるため。サーボはそのまま目標へ進む(#30 より前の`feedback_lost`も hold は書かない)。通常の移動中の`ABORT`がその位置で hold するのは変わらない。
+- **待機中のサーボの追跡の再設定**(`enableTracking`、多回転の分岐): goal との差の許容を 5 から 256 counts に広げた。握って手前で止まった爪(約 8 counts 手前)が、取り戻しの失敗のあと`unknown_turn_count`で動かせなくなっていた。1 回転ずれは従来どおり hold check で止める。
+- 雑音が続く間は、STOP / ABORT もサーボに届かない(従来と同じ)。待つのは 5 s までなので、それより長い雑音(ミストでは約 15 s)は従来どおり失敗する。
+- 実機結果(2026-11-26): ミストの雑音で約 4.5 s 返事がなかった爪の開きが`recovered=YES gap_ms=4494`で`PASS`(abs=1247、目標 1245)。候補の判定(レビュー #31 の修正)と`enableTracking`の許容の拡大は実機未確認。
+

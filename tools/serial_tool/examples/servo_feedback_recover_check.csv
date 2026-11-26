@@ -1,0 +1,9 @@
+command,delay_ms,expect,comment
+TEST_MODE ON,500,TEST_MODE result=ON,Enter test mode
+SERVO_STATUS 2,500,SERVO_STATUS id=2 result=OK,Claw (ID 2) answers and tracks; nothing in the claw's way
+SERVO_TURN 2 0.10,3000,SERVO_TURN id=2 value=0.10 result=PASS,Without noise: as before (no recovered= in the line)
+SERVO_TURN 2 -0.10,3000,SERVO_TURN id=2 value=-0.10 result=PASS,Back
+SERVO_TURN 2 0.10,9000,SERVO_TURN id=2,DURING THIS MOVE make noise on the servo line for 1-4 s (see the doc): expect result=PASS ... recovered=YES gap_ms=
+SERVO_STATUS 2,500,tracking=YES,Tracking is back: abs= is the target (+/-5)
+SERVO_TURN 2 -0.10,3000,SERVO_TURN id=2 value=-0.10 result=PASS,The next move goes as usual
+TEST_MODE OFF,500,TEST_MODE result=OFF,Leave test mode
