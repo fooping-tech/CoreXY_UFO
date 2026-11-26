@@ -7,6 +7,7 @@
 #include <string.h>
 #include "Core2PinMap.h"
 #include "PlotterConfig.h"
+#include "StsTurnRecovery.h"
 
 // (the main firmware and the hwtest build each define it)
 void logMessage(const char* format, ...);
@@ -646,7 +647,7 @@ StsMoveResult StsServoBus::moveRelative(uint8_t id, int32_t delta_counts,
                  static_cast<long>(target_counts));
         // #30: the servo may only be unheard (noise on the reply line): wait for it
         const StsMoveResult recovered = recoverLostFeedback(
-            id, target_counts, abort_requested, started_ms, detail, detail_size);
+            id, target_counts, abort_requested, started_ms, last_good_read_ms, detail, detail_size);
         move_diag.report(recovered);
         if (recovered == StsMoveResult::FAILED) move_diag.afterLoss();
         return recovered;
@@ -687,9 +688,11 @@ StsMoveResult StsServoBus::moveRelative(uint8_t id, int32_t delta_counts,
 
 StsMoveResult StsServoBus::recoverLostFeedback(uint8_t id, int32_t target_counts,
                                                bool (*abort_requested)(),
-                                               uint32_t move_started_ms, char* detail,
+                                               uint32_t move_started_ms,
+                                               uint32_t last_good_read_ms, char* detail,
                                                size_t detail_size) {
 #if SIMULATION_MODE
+  (void)last_good_read_ms;
   (void)id;
   (void)target_counts;
   (void)abort_requested;
@@ -698,6 +701,7 @@ StsMoveResult StsServoBus::recoverLostFeedback(uint8_t id, int32_t target_counts
   return StsMoveResult::FAILED;
 #else
   Track& state = track(id);
+  const int32_t last_abs = state.abs_counts;  // the last count heard
   state.valid = false;  // until the turn count is taken back
   const uint32_t lost_ms = millis();
   const char* why = "no_reply";
@@ -737,21 +741,31 @@ StsMoveResult StsServoBus::recoverLostFeedback(uint8_t id, int32_t target_counts
       why = "still_moving";  // answering, but the turn may still change: wait for the stop
       continue;
     }
-    const int diff = wrapDeltaCounts(raw - floorModTurn(target_counts));
-    if (abs(diff) > STS_FEEDBACK_RECOVER_MAX_COUNTS) {
-      why = "far_from_goal";
+    // review on #31: the angle alone does not tell the turn on a multi-turn move. Every count
+    // with this angle that lies on the path from the last count heard to the target, and that
+    // the servo could have reached since, is a candidate: only one = known.
+    const int32_t reach =
+        static_cast<int32_t>(static_cast<uint32_t>(STS_TEST_SPEED_COUNTS_PER_S) *
+                             (millis() - last_good_read_ms) / 1000U) +
+        STS_TEST_RUNAWAY_MARGIN_COUNTS;
+    const StsTurnRecovery turn =
+        stsRecoverTurn(last_abs, target_counts, raw, reach, STS_FEEDBACK_RECOVER_MAX_COUNTS,
+                       STS_COUNTS_PER_TURN);
+    if (!turn.known) {
+      why = turn.candidates == 0 ? "off_the_path" : "ambiguous_turn";
       break;
     }
-    // stopped near its goal: the turn is the goal's
-    state.abs_counts = target_counts + diff;
+    const int32_t diff = turn.abs_counts - target_counts;
+    state.abs_counts = turn.abs_counts;
     state.last_raw_counts = raw;
     state.valid = true;
     const unsigned long gap_ms = millis() - lost_ms + STS_TEST_MAX_READ_GAP_MS;
     logMessage("SERVO id=%u feedback recovered after ~%lums raw=%d goal=%ld abs=%ld", id, gap_ms,
                raw, static_cast<long>(target_counts), static_cast<long>(state.abs_counts));
-    if (abs(diff) <= STS_TEST_TOLERANCE_COUNTS) {
-      snprintf(detail, detail_size, "target=%ld actual=%ld error=%+d ms=%lu recovered=YES gap_ms=%lu",
-               static_cast<long>(target_counts), static_cast<long>(state.abs_counts), diff,
+    if (labs(diff) <= STS_TEST_TOLERANCE_COUNTS) {
+      snprintf(detail, detail_size, "target=%ld actual=%ld error=%+ld ms=%lu recovered=YES gap_ms=%lu",
+               static_cast<long>(target_counts), static_cast<long>(state.abs_counts),
+               static_cast<long>(diff),
                static_cast<unsigned long>(millis() - move_started_ms), gap_ms);
       return StsMoveResult::PASS;
     }

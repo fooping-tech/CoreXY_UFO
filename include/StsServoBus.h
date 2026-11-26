@@ -121,10 +121,11 @@ class StsServoBus {
   bool checkReady(uint8_t id, char* detail, size_t detail_size);
   void updateTracking(Track& track, int raw_counts);
   // #30: after a lost feedback, wait for the servo to answer again and take the
-  // turn count back from its goal (see STS_FEEDBACK_RECOVER_WAIT_MS).
+  // turn count back (see STS_FEEDBACK_RECOVER_WAIT_MS and StsTurnRecovery.h).
   StsMoveResult recoverLostFeedback(uint8_t id, int32_t target_counts,
                                     bool (*abort_requested)(), uint32_t move_started_ms,
-                                    char* detail, size_t detail_size);
+                                    uint32_t last_good_read_ms, char* detail,
+                                    size_t detail_size);
   bool holdAndVerify(uint8_t id, int32_t hold_counts, int start_raw_counts,
                      char* detail, size_t detail_size);
 
