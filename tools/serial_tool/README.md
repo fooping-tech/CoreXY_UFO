@@ -132,6 +132,7 @@ python tools/serial_tool/serial_send.py \
 | [Servo Power Cycle Check](docs/servo-power-cycle-check.md) | サーボだけ電源を入れ直した後の`SERVO_STATUS tracking=LOST`と、JOGでの多回転の再設定(`tracking=RESET`) | `examples/servo_power_cycle_check.csv`, `servo_power_cycle_check.py` |
 | [Servo Torque Limit Check](docs/servo-torque-limit-check.md) | 爪サーボ(ID 2)のトルク制限50%と、`SERVO_STATUS`の`torque_limit=`/`max_torque=` | `examples/servo_torque_limit_check.csv` |
 | [Servo Turn Limit Check](docs/servo-turn-limit-check.md) | `SERVO_TURN`の1回の上限(ID 1は6回転、ID 2は3回転)と`CONFIG`の`SERVO_LIMITS`行 | `examples/servo_turn_limit_check.csv`, `examples/servo_turn_limit_move_check.csv` |
+| [Servo Diag Check](docs/servo-diag-check.md) | サーボの移動中の電圧・電流・状態の記録(`SDIAG`、#28、調査用) | `examples/servo_diag_check.csv` |
 | [WebUI Test Mode Check](docs/webui-test-mode-check.md) | WebUI `Test`タブ/Serialでホーミングなしのリミット確認、モータ・X/Y移動、サーボID1/2の角度・回転 | `examples/webui_test_mode_check.csv` |
 | [STS3020 Standalone Test Check](docs/sts3020-test-check.md) | STS3020単体の通信・微小JOG確認(専用`m5stack-core2-sts3020-test` firmware) | `examples/sts3020_test_check.csv` |
 | [Melody Check](docs/melody-check.md) | TMC UART、Aモータ、診断メロディprofile | `examples/melody_check.csv` |
