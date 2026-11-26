@@ -58,6 +58,168 @@ bool readGoalCounts(uint8_t id, int32_t& goal_counts) {
   return true;
 }
 #if !SIMULATION_MODE
+// #28: what the servo said during a move (diagnostics only, never a decision).
+// Each poll reads the feedback block once more after the position read: voltage
+// [0.1 V], current [raw, ~6.5 mA], load [0.1 %, signed], the reply's status byte
+// (bit0 voltage, bit1 sensor, bit2 temperature, bit3 current, bit5 overload) and
+// temperature. A failed read keeps the library's error (1 no reply, 2 CRC,
+// 3 wrong ID, 4 length). One SDIAG line per move; the samples (SDIAG_S) when the
+// move did not PASS; SDIAG_AFTER after a lost feedback (did the servo restart?).
+class MoveDiag {
+ public:
+  void begin(uint8_t id, int32_t delta_counts) {
+    id_ = id;
+    delta_ = delta_counts;
+    t0_ = millis();
+    count_ = 0;
+    polls_ = 0;
+    head_ = 0;
+    ok_ = 0;
+    v_min_ = 1000;
+    v_max_ = -1;
+    i_max_ = -1;
+    load_max_ = 0;
+    status_or_ = 0;
+    memset(fails_, 0, sizeof(fails_));
+    first_fail_ms_ = -1;
+  }
+
+  // After a position read: ok = it answered (then the feedback block is read too).
+  void sample(bool position_ok, int raw) {
+    Sample s{};
+    s.t_ms = static_cast<uint16_t>(millis() - t0_);
+    if (!position_ok) {
+      s.err = servo.getLastError();
+      s.pos = -1;
+      note_fail(s.err, s.t_ms);
+    } else if (servo.FeedBack(id_) < 0) {
+      s.err = static_cast<uint8_t>(10 + servo.getLastError());  // position ok, block failed
+      s.pos = static_cast<int16_t>(raw);
+      note_fail(servo.getLastError(), s.t_ms);
+    } else {
+      s.pos = static_cast<int16_t>(raw);
+      s.volt = static_cast<int16_t>(servo.ReadVoltage(-1));
+      s.cur = static_cast<int16_t>(servo.ReadCurrent(-1));
+      s.load = static_cast<int16_t>(servo.ReadLoad(-1));
+      s.temp = static_cast<int8_t>(servo.ReadTemper(-1));
+      s.status = servo.getState();
+      ok_++;
+      if (s.volt >= 0 && s.volt < v_min_) v_min_ = s.volt;
+      if (s.volt > v_max_) v_max_ = s.volt;
+      if (s.cur > i_max_) i_max_ = s.cur;
+      if (abs(s.load) > abs(load_max_)) load_max_ = s.load;
+      status_or_ |= s.status;
+    }
+    polls_++;
+    buf_[head_] = s;
+    head_ = (head_ + 1) % kSamples;
+    if (count_ < kSamples) count_++;
+  }
+
+  void report(StsMoveResult result) {
+    logMessage("SDIAG id=%u result=%s delta=%ld ms=%lu samples=%u ok=%u v_min=%d v_max=%d "
+               "i_max=%d load_max=%+d status_or=0x%02X fail_noreply=%u fail_crc=%u fail_other=%u "
+               "first_fail_ms=%ld",
+               id_, stsMoveResultName(result), static_cast<long>(delta_),
+               static_cast<unsigned long>(millis() - t0_), polls_, ok_,
+               v_max_ < 0 ? -1 : v_min_, v_max_, i_max_, load_max_, status_or_, fails_[0],
+               fails_[1], fails_[2], static_cast<long>(first_fail_ms_));
+    if (result == StsMoveResult::PASS) return;
+    // the last samples, 6 to a line: t:pos/volt/cur/load/status[/err]
+    const uint16_t n = count_;
+    const uint16_t start = (head_ + kSamples - n) % kSamples;
+    char line[300];
+    size_t used = 0;
+    uint16_t in_line = 0;
+    for (uint16_t k = 0; k < n; ++k) {
+      const Sample& s = buf_[(start + k) % kSamples];
+      if (in_line == 0) used = snprintf(line, sizeof(line), "SDIAG_S id=%u", id_);
+      if (s.err != 0 && s.pos < 0) {
+        used += snprintf(line + used, sizeof(line) - used, " %u:ERR%u", s.t_ms, s.err);
+      } else if (s.err != 0) {
+        used += snprintf(line + used, sizeof(line) - used, " %u:%d/ERR%u", s.t_ms, s.pos, s.err);
+      } else {
+        used += snprintf(line + used, sizeof(line) - used, " %u:%d/%dV/%dI/%+dL/%02X/%dC", s.t_ms,
+                         s.pos, s.volt, s.cur, s.load, s.status, s.temp);
+      }
+      if (++in_line == 6 || k + 1 == n) {
+        logMessage("%s", line);
+        in_line = 0;
+        delay(5);  // let the log task drain (its queue is short)
+      }
+    }
+  }
+
+  // After a lost feedback: ping until the servo answers (up to kAfterMs), then
+  // read what a restart would have reset.
+  void afterLoss() {
+    const uint32_t from = millis();
+    uint16_t pings = 0;
+    while (millis() - from < kAfterMs) {
+      pings++;
+      if (servo.Ping(id_) == id_) {
+        const unsigned long back_ms = millis() - from;
+        int torque = -1, torque_limit = -1, min_l = -1, max_l = -1, volt = -1, mode = -1;
+        readByteOk(id_, SMS_STS_TORQUE_ENABLE, torque);
+        readWordOk(id_, SMS_STS_TORQUE_LIMIT_L, torque_limit);
+        readAngleLimits(id_, min_l, max_l);
+        readByteOk(id_, SMS_STS_PRESENT_VOLTAGE, volt);
+        readByteOk(id_, SMS_STS_MODE, mode);
+        // a restart reloads the angle limits (0/4095) and the torque limit (EEPROM)
+        const bool restarted = (min_l == 0 && max_l == SINGLE_TURN_MAX_LIMIT_COUNTS) ||
+                               (torque_limit >= 0 && torque_limit != stsTorqueLimit(id_));
+        logMessage("SDIAG_AFTER id=%u back=YES back_ms=%lu pings=%u torque=%d torque_limit=%d "
+                   "limits=%d/%d mode=%d voltage=%d restarted=%s",
+                   id_, back_ms, pings, torque, torque_limit, min_l, max_l, mode, volt,
+                   restarted ? "YES" : "NO");
+        return;
+      }
+      delay(20);
+    }
+    logMessage("SDIAG_AFTER id=%u back=NO waited_ms=%lu pings=%u last_err=%u", id_,
+               static_cast<unsigned long>(kAfterMs), pings, servo.getLastError());
+  }
+
+ private:
+  struct Sample {
+    uint16_t t_ms;
+    int16_t pos;
+    int16_t volt;
+    int16_t cur;
+    int16_t load;
+    int8_t temp;
+    uint8_t status;
+    uint8_t err;
+  };
+  static constexpr uint16_t kSamples = 36;
+  static constexpr uint32_t kAfterMs = 1500;
+
+  void note_fail(uint8_t err, uint16_t t_ms) {
+    if (err == 1) fails_[0]++;
+    else if (err == 2) fails_[1]++;
+    else fails_[2]++;
+    if (first_fail_ms_ < 0) first_fail_ms_ = t_ms;
+  }
+
+  uint8_t id_ = 0;
+  int32_t delta_ = 0;
+  uint32_t t0_ = 0;
+  Sample buf_[kSamples];
+  uint16_t count_ = 0;
+  uint16_t polls_ = 0;
+  uint16_t head_ = 0;
+  uint16_t ok_ = 0;
+  int v_min_ = 1000;
+  int v_max_ = -1;
+  int i_max_ = -1;
+  int load_max_ = 0;
+  uint8_t status_or_ = 0;
+  uint16_t fails_[3] = {0, 0, 0};
+  long first_fail_ms_ = -1;
+};
+
+MoveDiag move_diag;
+
 // Call before every torque ON: the RAM torque limit reloads from EEPROM
 // (100 %) whenever the servo is power cycled.
 bool writeTorqueLimit(uint8_t id) {
@@ -445,6 +607,7 @@ StsMoveResult StsServoBus::moveRelative(uint8_t id, int32_t delta_counts,
       STS_TEST_TIMEOUT_MARGIN_MS;
   const uint32_t started_ms = millis();
   uint32_t last_good_read_ms = started_ms;
+  move_diag.begin(id, delta_counts);  // #28
   while (millis() - started_ms < timeout_ms) {
     delay(STS_TEST_POLL_INTERVAL_MS);
     if (abort_requested != nullptr && abort_requested()) {
@@ -453,15 +616,20 @@ StsMoveResult StsServoBus::moveRelative(uint8_t id, int32_t delta_counts,
                        STS_TEST_SPEED_COUNTS_PER_S, STS_TEST_ACC);
       snprintf(detail, detail_size, "target=%ld actual=%ld reason=abort hold=YES",
                static_cast<long>(target_counts), static_cast<long>(state.abs_counts));
+      move_diag.report(StsMoveResult::ABORTED);
       return StsMoveResult::ABORTED;
     }
     int sample = 0;
-    if (!readRawPosition(id, sample)) {
+    const bool read_ok = readRawPosition(id, sample);
+    move_diag.sample(read_ok, sample);  // #28: diagnostics only
+    if (!read_ok) {
       if (millis() - last_good_read_ms > STS_TEST_MAX_READ_GAP_MS) {
         state.valid = false;
         snprintf(detail, detail_size,
                  "target=%ld reason=feedback_lost tracking=INVALID",
                  static_cast<long>(target_counts));
+        move_diag.report(StsMoveResult::FAILED);
+        move_diag.afterLoss();
         return StsMoveResult::FAILED;
       }
       continue;
@@ -477,6 +645,7 @@ StsMoveResult StsServoBus::moveRelative(uint8_t id, int32_t delta_counts,
       snprintf(detail, detail_size,
                "target=%ld actual=%ld reason=runaway torque=OFF tracking=INVALID",
                static_cast<long>(target_counts), static_cast<long>(state.abs_counts));
+      move_diag.report(StsMoveResult::FAILED);
       return StsMoveResult::FAILED;
     }
     if (labs(state.abs_counts - target_counts) <= STS_TEST_TOLERANCE_COUNTS &&
@@ -485,12 +654,14 @@ StsMoveResult StsServoBus::moveRelative(uint8_t id, int32_t delta_counts,
                static_cast<long>(target_counts), static_cast<long>(state.abs_counts),
                static_cast<long>(state.abs_counts - target_counts),
                static_cast<unsigned long>(millis() - started_ms));
+      move_diag.report(StsMoveResult::PASS);
       return StsMoveResult::PASS;
     }
   }
   snprintf(detail, detail_size, "target=%ld actual=%ld ms=%lu torque=ON",
            static_cast<long>(target_counts), static_cast<long>(state.abs_counts),
            static_cast<unsigned long>(timeout_ms));
+  move_diag.report(StsMoveResult::TIMEOUT);
   return StsMoveResult::TIMEOUT;
 #endif
 }
