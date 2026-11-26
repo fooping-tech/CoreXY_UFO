@@ -2833,3 +2833,13 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 - [ ] 実機: 候補の判定(レビュー #31 の修正)と、手前で止まった爪の再設定
 - [ ] 5 s を超える雑音(ミストでは約 15 s)は従来どおり失敗する。雑音そのものはハードウェアで対策する(R42)
 
+## 2026-11-26: 原点のすぐ近くで原点limitを踏んだら端として止める (#32)
+
+- [x] `HOME_EDGE_LIMIT_ZONE_MM`(8 mm): 原点からこの距離以内でのlimit ONはalarmにせずHOMEDを保つ(`LIMIT edge axis=..`)。座標は振り直さない
+- [x] 触れた点から`NORMAL_MOVE_LIMIT_RELEASE_MM`以内にOFFへ戻らなければ`home limit did not release`。ゾーン外は従来どおり`hard limit active away from home`
+- [x] 通常XYで、原点limitへ向かうブロックはlimit ONで即停止し`NACK_XY ... reason=limit_x|limit_y X= Y=`
+- [x] 判定を`include/HomeEdgeLimit.h`へ分け、native テスト`test/native/test_home_edge_limit.cpp`
+- [x] `tools/serial_tool/docs/home-edge-limit-check.md`
+- [ ] 実機: 端へのJOG(ゲームの手のスティック、−Y 約59 mm/s)でalarmにならずHOMEDのまま、離れる向きへ動けること
+- [ ] 実機: 端へのXY(`XY x 0`より原点側に位置がずれた状態)で`NACK_XY ... reason=limit_y`
+- [ ] 高速(265 mm/s)のXYでlimitを踏んだときの即停止で脱調しないか(JOGの`limit_*`と同じ止め方)

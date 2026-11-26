@@ -28,3 +28,9 @@ c++ -std=c++17 -Iinclude -Itest/native \
   -o /tmp/corexy_plotter_native_sts_turn_recovery_tests
 
 /tmp/corexy_plotter_native_sts_turn_recovery_tests
+
+c++ -std=c++17 -Iinclude -Itest/native \
+  test/native/test_home_edge_limit.cpp \
+  -o /tmp/corexy_plotter_native_home_edge_limit_tests
+
+/tmp/corexy_plotter_native_home_edge_limit_tests

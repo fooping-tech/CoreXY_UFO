@@ -444,6 +444,21 @@ constexpr uint32_t HARD_LIMIT_UNEXPECTED_ALARM_MS = 80;
 // ONのままなので、原点から離れる最初の移動のために20 mmへ。
 constexpr float NORMAL_MOVE_LIMIT_RELEASE_MM = 20.0f;
 
+// HOMEDの通常運転で、原点limitがこの距離 [mm]以内(その軸の原点から)でONになったら
+// 「端に触れた」として扱う(#32)。その軸のlimitへ向かう動きを止める(JOGは`JOG end reason=limit_*`、
+// XYは`NACK_XY ... reason=limit_*`)が、アラームにせずHOMEDを保ち、座標は振り直さない。
+// 離れる向きの移動は許し、触れた点からNORMAL_MOVE_LIMIT_RELEASE_MM以内にOFFへ戻らなければアラーム。
+// これより遠い位置でONなら従来どおり位置ずれ・衝突としてアラーム(HARD_LIMIT_UNEXPECTED_ALARM_MS)。
+// 決め方: 2026-11-26 ゲームの手のスティックで-Yへ59 mm/sのジョグがY=0.715でlimitを踏み、
+// 0.5 mmの旧判定でアラーム→再ホーミングになった。原点の再現性(single pass)と高速ジョグの
+// 止まり代を含む幅としてHOMING_BACKOFF_MMと同じ8 mm。原点の手前移動(HOMING_FAST_APPROACH_MARGIN_MM)
+// で踏んだら位置ずれと分かるよう、それより十分小さくする。
+constexpr float HOME_EDGE_LIMIT_ZONE_MM = 8.0f;
+static_assert(HOME_EDGE_LIMIT_ZONE_MM >= 0.5f &&
+                  HOME_EDGE_LIMIT_ZONE_MM < HOMING_FAST_APPROACH_MARGIN_MM &&
+                  HOME_EDGE_LIMIT_ZONE_MM < NORMAL_MOVE_LIMIT_RELEASE_MM,
+              "HOME_EDGE_LIMIT_ZONE_MM must stay small next to the fast approach margin and the release allowance");
+
 // trueならhoming完了前の通常XY移動を拒否する。
 // 実機安全のためtrue推奨。ZEROはhoming扱いにしない。
 constexpr bool HOMING_REQUIRE_HOMED_FOR_XY_MOVE = true;

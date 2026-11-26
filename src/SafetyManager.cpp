@@ -156,14 +156,22 @@ void SafetyManager::poll() {
       setAlarm("Y home limit did not release");
       return;
     }
+    // #32: a home switch ON near the home edge is the end of the stage, not
+    // an alarm; the motion paths stop the move toward it.
+    if (!pollHomeEdge(x_edge_, 'X', x_debounced_, xLimitRawActive(),
+                      machine_state.x_mm, HOMING_SET_X_MM, HOMING_X_DIR) ||
+        !pollHomeEdge(y_edge_, 'Y', y_debounced_, yLimitRawActive(),
+                      machine_state.y_mm, HOMING_SET_Y_MM, HOMING_Y_DIR)) {
+      return;
+    }
     const bool x_unexpected =
-        x_debounced_ && !x_release_allowed_ &&
-        ((HOMING_X_DIR < 0 && machine_state.x_mm > HOMING_SET_X_MM + 0.5f) ||
-         (HOMING_X_DIR > 0 && machine_state.x_mm < HOMING_SET_X_MM - 0.5f));
+        !x_release_allowed_ &&
+        x_edge_.unexpected(x_debounced_, machine_state.x_mm, HOMING_SET_X_MM,
+                           HOMING_X_DIR, HOME_EDGE_LIMIT_ZONE_MM);
     const bool y_unexpected =
-        y_debounced_ && !y_release_allowed_ &&
-        ((HOMING_Y_DIR < 0 && machine_state.y_mm > HOMING_SET_Y_MM + 0.5f) ||
-         (HOMING_Y_DIR > 0 && machine_state.y_mm < HOMING_SET_Y_MM - 0.5f));
+        !y_release_allowed_ &&
+        y_edge_.unexpected(y_debounced_, machine_state.y_mm, HOMING_SET_Y_MM,
+                           HOMING_Y_DIR, HOME_EDGE_LIMIT_ZONE_MM);
     if (x_unexpected && x_unexpected_since_ms_ == 0) {
       x_unexpected_since_ms_ = now_ms;
     } else if (!x_unexpected) {
@@ -192,5 +200,31 @@ void SafetyManager::poll() {
   } else {
     x_unexpected_since_ms_ = 0;
     y_unexpected_since_ms_ = 0;
+    x_edge_.reset();
+    y_edge_.reset();
+  }
+}
+
+// Returns false when it raised the alarm.
+bool SafetyManager::pollHomeEdge(HomeEdgeLatch& latch, char axis, bool limit_on,
+                                 bool limit_raw_on, float pos_mm, float home_mm,
+                                 int8_t home_dir) {
+  const float touch_mm = latch.touchMm();
+  switch (latch.update(limit_on, limit_raw_on, pos_mm, home_mm, home_dir,
+                       HOME_EDGE_LIMIT_ZONE_MM, NORMAL_MOVE_LIMIT_RELEASE_MM)) {
+    case HomeEdgeEvent::TOUCHED:
+      logMessage("LIMIT edge axis=%c %c=%.3f (no alarm)", axis, axis, pos_mm);
+      return true;
+    case HomeEdgeEvent::RELEASED:
+      logMessage("LIMIT edge released axis=%c %c=%.3f moved=%.3f", axis, axis,
+                 pos_mm, fabsf(pos_mm - touch_mm));
+      return true;
+    case HomeEdgeEvent::NOT_RELEASED:
+      setAlarm(axis == 'X' ? "X home limit did not release"
+                           : "Y home limit did not release");
+      return false;
+    case HomeEdgeEvent::NONE:
+    default:
+      return true;
   }
 }

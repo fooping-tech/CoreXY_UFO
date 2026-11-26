@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "HomeEdgeLimit.h"
 
 class SafetyManager {
  public:
@@ -25,6 +26,9 @@ class SafetyManager {
   void poll();
 
  private:
+  bool pollHomeEdge(HomeEdgeLatch& latch, char axis, bool limit_on,
+                    bool limit_raw_on, float pos_mm, float home_mm,
+                    int8_t home_dir);
   bool readLimitPin(int pin) const;
   bool updateDebounced(bool raw_active, bool& last_raw, bool& debounced,
                        uint32_t& last_change_ms);
@@ -43,5 +47,7 @@ class SafetyManager {
   bool y_release_allowed_ = false;
   float x_release_start_mm_ = 0.0f;
   float y_release_start_mm_ = 0.0f;
+  HomeEdgeLatch x_edge_;
+  HomeEdgeLatch y_edge_;
   char alarm_reason_[64] = "none";
 };
