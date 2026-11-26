@@ -2270,6 +2270,7 @@ Phase 6.9を実装してください。
 | R39 | [ ] | WebUI Image to G-codeのPNG/JPEG traceはホスト側単体テストのみで、実機での描画品質、線分密度、ペン/紙条件に対する最適設定が未確認 | Line Art/Outline Trace、threshold、skeletonize、max segmentsを小さい画像から確認し、必要ならOpenCV/scikit-imageベースのtraceへ差し替える |
 | R40 | [ ] | 新規コントローラPCBのhwtestはbuild確認のみで、実機でのUART応答、PIN_CHECK、open load判定、limit pull-up、servo/LED動作が未確認 | `hwtest-check.md`の順でVM無し→VM有り/モータ無し→モータ有りと段階的に実行し、結果をここへ反映する |
 | R41 | [ ] | hwtestのTMC電流既定400mAとMOTOR速度800 steps/sは初回通電用の暫定値。open load判定(ola/olb)は速度依存で誤検出があり得る | 実機で回転確認後に必要なら`TMC_INIT <mA>`で上げ、ola/olbが出る場合は低速で再確認する |
+| R42 | [ ] | イルミネーションのミストの駆動の雑音が STS3020 の受信線(GPIO33)に入り、1 回のミストで約 15 秒サーボの返事が読めない(2026-11-26、ユーザーがミストを切って確認)。会場の電磁ノイズでも起こりうる | ハードウェアで対策(ミストの電源と GND を分ける、フェライト、信号線と GND のより線)。ファームウェアの取り戻しは #30、ゲームはミストを当面なし(CoreXY_UFO_Game #316) |
 
 ---
 
@@ -2359,6 +2360,7 @@ Phase 6.9を実装してください。
 | 2026-06-14 | Fun MazeのSVG出力をセル壁ごとの`line`から、接続壁componentをDFS walkした長い`polyline`へ変更。1mm/2mm刻みの壁ごとにpen up/downする問題を軽減し、S/G文字は小さめの独立strokeとして維持 | Codex |
 | 2026-06-14 | Fun MazeのS/G文字も個別`line`から連続`polyline`へ変更し、Hard maze変換結果を4 strokes（壁2、S、G）へ削減。SVG to G-codeのstroke間に出ていた重複`M5`も除去 | Codex |
 | 2026-10-04 | コントローラPCB検査用`m5stack-core2-hwtest` envを追加。limit安定性、TMC2209 UART/IOIN/GSTAT/DRV_STATUS、STEP/DIR→IOINループバック、単独MOTOR、servo、NEOPIXEL、AXP192電源表示をSerial/LCDで検査。`TMC2209Manager`/`PenController`へ診断APIを追加。実機確認は未実施(R40/R41) | Claude |
+| 2026-11-26 | サーボの移動中の電圧・電流・状態の記録(`SDIAG`、Issue #28)を追加 | Claude |
 
 ---
 
@@ -2809,3 +2811,12 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 - [x] `STS_IDLE_DRIFT_MAX_COUNTS`=256 を `moveRelative` と JOG 開始で使う。上限以内は追跡に取り込みログ1行
 - [x] `CONFIG` の `SERVO_LIMITS` に `idle_drift_max`
 - [ ] 実機: カプセルを握って運び、放せる(ゲームのかんたんモード)
+
+## 2026-11-26: サーボの移動中の電圧・電流・状態の記録 (#28)
+
+- [x] `moveRelative` の監視ループで `FeedBack()` を読み、直近 36 サンプルを持つ
+- [x] 移動ごとの `SDIAG`、PASS 以外の `SDIAG_S`、`feedback_lost` 後の `SDIAG_AFTER`
+- [x] `tools/serial_tool/examples/servo_diag_check.csv`、`docs/servo-diag-check.md`
+- [x] 実機: 通常の開閉で `SDIAG` が出る(7.3〜7.6 V、失敗なし)。Dial の上の失敗で電源ではないと判定(受信線へのデータの流れ込み、原因はミスト)
+- [ ] 調査が終わったら、この記録を残すか外すかを決める(1 poll につき 1 回の読出しが増える)
+
