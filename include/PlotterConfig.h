@@ -215,6 +215,16 @@ constexpr uint32_t STS_TEST_TIMEOUT_MARGIN_MS = 2000;
 // 折り返し補正はpoll間の移動が半回転未満の間だけ有効。読出し欠落がこの時間を超えたら
 // 追跡を無効化して止める。2400 counts/s * 0.25s = 600 counts(半回転2048より十分小さい)。
 constexpr uint32_t STS_TEST_MAX_READ_GAP_MS = 250;
+// #30: 読出し欠落が STS_TEST_MAX_READ_GAP_MS を超えたら、すぐ失敗にせず最大この時間、サーボの
+// 返事を待つ。戻ったら、角度リミット 0/0・goal = 命令した target・停止中・1 回転内の差が
+// STS_FEEDBACK_RECOVER_MAX_COUNTS 以内なら、abs = target + 差 として追跡を取り戻す。
+// (2026-11-26 実機: Dial 上で受信に約 3 秒データが流れ込み続けた。サーボ自身は目標に着いていた)
+constexpr uint32_t STS_FEEDBACK_RECOVER_WAIT_MS = 5000;
+constexpr int STS_FEEDBACK_RECOVER_MAX_COUNTS = 256;
+// #30: 受信バッファを空にする処理の上限。FTServo の rFlushSCS() はデータが届き続ける間戻らない。
+constexpr uint32_t STS_RX_FLUSH_MAX_US = 2000;
+static_assert(STS_FEEDBACK_RECOVER_MAX_COUNTS < STS_COUNTS_PER_TURN / 2,
+              "the recovered turn must not be ambiguous");
 // hold check: hold + torque ON後この時間で+/-許容を超えて動けば即torque OFF。
 constexpr uint32_t STS_TEST_HOLD_CHECK_MS = 200;
 constexpr int STS_TEST_HOLD_CHECK_TOLERANCE_COUNTS = 10;
