@@ -2840,6 +2840,7 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 - [x] 通常XYで、原点limitへ向かうブロックはlimit ONで即停止し`NACK_XY ... reason=limit_x|limit_y X= Y=`
 - [x] 判定を`include/HomeEdgeLimit.h`へ分け、native テスト`test/native/test_home_edge_limit.cpp`
 - [x] `tools/serial_tool/docs/home-edge-limit-check.md`
+- [x] `platformio.ini`: M5Unified@0.2.25・M5GFX@0.2.32・TMCStepper@0.7.3・FTServo のコミットを固定。新しいチェックアウトでは M5Unified/M5GFX 0.3.0 が入り、その書き込みで画面の向きが変わり、サーボ 2 台が NO_REPLY、TMC=NO になった(このPRの初回の実機書き込み、2026-11-26)
 - [ ] 実機: 端へのJOG(ゲームの手のスティック、−Y 約59 mm/s)でalarmにならずHOMEDのまま、離れる向きへ動けること
 - [ ] 実機: 端へのXY(`XY x 0`より原点側に位置がずれた状態)で`NACK_XY ... reason=limit_y`
 - [ ] 高速(265 mm/s)のXYでlimitを踏んだときの即停止で脱調しないか(JOGの`limit_*`と同じ止め方)
