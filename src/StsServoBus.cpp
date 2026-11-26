@@ -489,8 +489,10 @@ bool StsServoBus::enableTracking(uint8_t id, char* detail, size_t detail_size) {
     // last goal within the turn. A whole-turn mismatch (shaft turned a full
     // turn by hand while torque was off) is caught by the hold check before
     // any goal moves; it stops the servo within ~200 ms.
+    // #30: a servo that stopped short of its goal (a gripped capsule, a block) is still at a
+    // known turn while it is within STS_FEEDBACK_RECOVER_MAX_COUNTS (well under half a turn).
     const int offset = wrapDeltaCounts(raw_counts - floorModTurn(goal_counts));
-    if (moving != 0 || abs(offset) > STS_TEST_TOLERANCE_COUNTS) {
+    if (moving != 0 || abs(offset) > STS_FEEDBACK_RECOVER_MAX_COUNTS) {
       snprintf(detail, detail_size,
                "reason=unknown_turn_count torque=%d moving=%d goal=%ld raw=%d "
                "(power-cycle servo)",
