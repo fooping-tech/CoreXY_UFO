@@ -1462,3 +1462,16 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - 対象は`StsServoBus::moveRelative`とJOG開始の2か所。到達判定・hold check・JOGの静止判定は5 countsのまま。
 - `CONFIG`の`SERVO_LIMITS`行に`idle_drift_max=256`。
 - 実機未確認。
+
+## 2026-11-26: サーボの移動中の電圧・電流・状態の記録(Issue #28、調査用)
+
+- 背景: ゲームのかんたんモードで、カプセルを握った爪(ID 2)を Dial の上で開くたびに`SERVO_TURN 2 ... result=FAILED reason=feedback_lost tracking=INVALID`で止まった。電源か配線・ノイズかを分けるための記録。判定(250 msの読出し欠落、runaway、許容差)は変えない。
+- `moveRelative`の監視ループで、位置の読出しが成功するたびに`FeedBack()`(PRESENT_POSITION_L から PRESENT_CURRENT_H まで 15 バイト)をもう 1 回読む。直近 36 個をリングバッファに持つ。1 Mbps で 1 回の poll(20 ms)につき 1 回の読出しが増える。
+  - 電圧: 0.1 V 単位。電流: 生の値(約 6.5 mA/単位)。負荷: 0.1 % 単位、符号付き。応答の状態バイト: bit0 電圧、bit1 センサー、bit2 温度、bit3 電流、bit5 過負荷。温度: ℃。
+  - 読めなかったサンプルは FTServo のエラー(1 無応答、2 CRC、3 ID 違い、4 長さ)を持つ。位置は読めて FeedBack だけ失敗したら 10 + エラー。
+- 出力(ホストは`SDIAG`で始まる行を知らないログとして扱う。`SERVO_TURN`/`SERVO_STATUS`の解析には当たらない):
+  - 移動ごとに 1 行: `SDIAG id= result= delta= ms= samples= ok= v_min= v_max= i_max= load_max= status_or= fail_noreply= fail_crc= fail_other= first_fail_ms=`
+  - PASS 以外のとき、直近のサンプルを 6 個ずつ: `SDIAG_S id= t:pos/電圧V/電流I/負荷L/状態/温度C`(読めなかったものは`t:ERRn`)。ログのキュー(24 行)があふれないよう 5 ms あけて出す。
+  - `feedback_lost`のあと: 最大 1.5 s Ping し、戻ったら`SDIAG_AFTER id= back=YES back_ms= pings= torque= torque_limit= limits= mode= voltage= restarted=YES|NO`、戻らなければ`back=NO waited_ms= pings= last_err=`。restarted は、角度リミットが 0/4095 に戻ったか、トルク上限が`stsTorqueLimit(id)`と違うとき YES(どちらもサーボの電源投入で戻る)。この待ちのぶん、`feedback_lost`の結果は最大 1.5 s 遅れる(サーボはもともと応答していない)。
+- 実機結果(2026-11-26): 失敗の直前まで電圧 7.4〜7.6 V、電流は小さく、状態バイトは 0、サーボは再起動していない(`restarted=NO`)。0.65 s 以降は 1 回の読出しが 2.2 s 戻らず(FTServo の`rFlushSCS()`はデータが届き続ける間戻らない)、返ってきたのは ID 違い(ERR3)。電源ではなく受信線へのデータの流れ込み。原因はイルミネーションのミスト(ユーザーがミストを電気的に切って確認)。対策は Issue #30。
+

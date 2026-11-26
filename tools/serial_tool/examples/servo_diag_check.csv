@@ -1,0 +1,7 @@
+command,delay_ms,expect,comment
+TEST_MODE ON,500,TEST_MODE result=ON,Enter test mode
+SERVO_STATUS 2,500,SERVO_STATUS id=2 result=OK,Claw (ID 2) answers; note raw= and that nothing is in the claw's way
+SERVO_TURN 2 0.10,3000,SDIAG id=2 result=PASS,CLAW MOVES 0.10 turn (36 deg): one SDIAG line before the result (ok=samples, fail_*=0)
+SERVO_TURN 2 -0.10,3000,SDIAG id=2 result=PASS,Claw back: SDIAG again; v_min/v_max are the supply under load (0.1 V)
+SERVO_STATUS 2,500,SERVO_STATUS id=2 result=OK,Back where it started (+/-5)
+TEST_MODE OFF,500,TEST_MODE result=OFF,Leave test mode
