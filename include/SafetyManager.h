@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "HomeEdgeLimit.h"
 
 class SafetyManager {
  public:
@@ -22,9 +23,19 @@ class SafetyManager {
                                             float start_x_mm,
                                             float start_y_mm);
   void clearNormalMoveLimitReleaseAllowance();
+  // poll() runs in safetyTask (STACK_SAFETY 2 KB) as well as in motionTask:
+  // it must not call logMessage() or format floats (#32, a Double exception
+  // in _dtoa_r). It posts edge events; motionTask logs them with
+  // logPendingHomeEdgeEvents().
   void poll();
+  // Call from motionTask only.
+  void logPendingHomeEdgeEvents();
 
  private:
+  bool pollHomeEdge(HomeEdgeLatch& latch, HomeEdgeReportSlot& report,
+                    char axis, bool limit_on,
+                    bool limit_raw_on, float pos_mm, float home_mm,
+                    int8_t home_dir);
   bool readLimitPin(int pin) const;
   bool updateDebounced(bool raw_active, bool& last_raw, bool& debounced,
                        uint32_t& last_change_ms);
@@ -43,5 +54,9 @@ class SafetyManager {
   bool y_release_allowed_ = false;
   float x_release_start_mm_ = 0.0f;
   float y_release_start_mm_ = 0.0f;
+  HomeEdgeLatch x_edge_;
+  HomeEdgeLatch y_edge_;
+  HomeEdgeReportSlot x_edge_report_;
+  HomeEdgeReportSlot y_edge_report_;
   char alarm_reason_[64] = "none";
 };

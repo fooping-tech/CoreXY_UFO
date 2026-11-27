@@ -537,6 +537,12 @@ HomingのSeekFast、Backoff、SeekSlowは短い固定距離moveの反復では�
 XY batch完了時には、ジョブ開始、HOME、ZEROなどで揃えたbackend基準からの相対A/B stepとMachineStateの相対A/B stepを比較する。不一致があれば`WARN: DRIFT a=... b=...`をログし、timed segment部分投入や状態更新漏れの再発を検出する。
 homing完了直後など、通常移動開始時に原点limitがONで、かつ移動方向がそのlimitから離れる方向の場合は、`NORMAL_MOVE_LIMIT_RELEASE_MM`の範囲だけlimit ONを一時許容する。
 この範囲内にraw/debouncedがOFFへ戻れば通常移動を継続し、OFFへ戻らない場合は`X home limit did not release`または`Y home limit did not release`でalarm停止する。
+#32: HOMEDの通常運転(homing中でない)で、原点limitのdebouncedが、その軸の原点から`HOME_EDGE_LIMIT_ZONE_MM`(8 mm)以内でONになったら「端に触れた」として扱う。アラームにせず、HOMEDを保ち、座標は振り直さない。`LIMIT edge axis=X|Y X|Y=<位置> (no alarm)`を1回ログする。その後は触れた点から`NORMAL_MOVE_LIMIT_RELEASE_MM`(20 mm)離れるまでlimit ONを許し、それまでにraw/debouncedともOFFへ戻れば`LIMIT edge released axis=.. ..=<位置> moved=<触れた点からの距離>`、戻らなければ`X|Y home limit did not release`でalarm。ゾーンより遠い位置でのlimit ONは従来どおり`hard limit active away from home`のalarm(`HARD_LIMIT_UNEXPECTED_ALARM_MS`継続後)。判定は`include/HomeEdgeLimit.h`(native テスト`test/native/test_home_edge_limit.cpp`)。`SafetyManager::poll()`はsafetyTask(スタック2 KB)からも呼ばれるため、そこではログも浮動小数点の書式化もしない。`LIMIT edge`の行はpollが置いたイベントをmotionTaskが出す(数ms〜1周期遅れる)。
+各移動経路での扱い:
+- 通常XY(`XY`/`G0`/`G1`): 開始時にOFFだった原点limitへ向かう成分のあるブロックは、そのlimitのrawまたはdebouncedがONになった時点でbackendを即停止し、`NACK_XY target=(x,y) reason=limit_x|limit_y X=.. Y=..`(STOPと同じく停止位置付き)を返す。先読み済みの後続ブロックは`NACK_XY ... reason=stopped`。端ならalarmにならない。原点から遠ければその後SafetyManagerのalarmになる。ONのlimitへ向かう`XY`は従来どおり`REJECT: Y limit active and move pushes toward limit`(`NACK_XY ... reason=rejected`)で受け付けない。離れる向きは受け付ける。
+- JOG(シリアル・ジョイスティック): 従来どおり、新たにONになったlimitへ向かっていれば即停止して`JOG end reason=limit_x|limit_y`、ONのlimitへ向かう成分は0。#32でその後のalarmが出なくなった(端なら)。離れる向きのJOGは動ける。
+- テストモードの移動(`TEST_A`/`TEST_B`/UIのモータテスト): HOMEDを外す移動のためSafetyManagerの判定の対象外。従来どおり`STOPPED_LIMIT`で止まる。
+- 原点の手前移動(#20)は従来どおりlimit raw ONでalarm(手前の位置は原点から20 mmでゾーンの外)。
 `ABORT`で停止した場合は実位置が論理座標と一致する保証がないため、homed状態を無効化しalarm状態にする。復旧は`ZERO -> ALARM_CLEAR -> HOME`の順に行う。
 
 正式な描画入力はG-codeを基本とする。`XY`、`TEST_A`、`TEST_B`、`AB_TIMED`、`MELODY`はbring-up、診断、切り分け用コマンドとして扱い、通常ジョブの外部インターフェースにはしない。
@@ -740,6 +746,7 @@ GPIO35/36は内部pull-upに頼らず、外付けの抵抗を前提とする。
 ただし、瞬間的な入力ノイズで即alarmにしないため、debounce後に`HARD_LIMIT_UNEXPECTED_ALARM_MS`で指定した時間だけ継続してactiveの場合にalarmへ入る。
 2026-06-08時点の暫定値は20msであり、停止距離とlimit入力ノイズ耐性は実機で再確認する。
 homing完了直後の退避移動では、`NORMAL_MOVE_LIMIT_RELEASE_MM`の範囲でhome limit releaseを待つ。2026-06-08時点の暫定値は8mmである。
+ただし原点から`HOME_EDGE_LIMIT_ZONE_MM`(8 mm、#32)以内でのlimit ONは端に触れたものとしてalarmにしない(上の「通常XY/timed segment実行中」の節)。
 
 ---
 

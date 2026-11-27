@@ -280,6 +280,40 @@ void rejectSerialJogWhileBusy(const char* reason) {
   rejectSerialJog(request, reason);
 }
 
+// #32: a normal XY move toward a home switch stops at once when that switch
+// comes ON (like JOG's limit_x/limit_y), instead of driving into it until the
+// hard-limit alarm. At the home edge SafetyManager raises no alarm, so the
+// machine stays HOMED; farther away its alarm still follows. Armed only while
+// executePlannedBlock runs the block.
+struct XYHomeLimitWatch {
+  bool armed = false;
+  bool watch_x = false;  // moving toward the X home switch, which was OFF at the start
+  bool watch_y = false;
+  bool hit_x = false;
+  bool hit_y = false;
+};
+XYHomeLimitWatch xy_home_limit_watch;
+
+// Call right after safety_manager.poll(). On a hit, stops the motors, waits
+// for them and updates the position; returns true.
+bool stopXYOnHomeLimitHit(const MotionSyncReference& reference) {
+  XYHomeLimitWatch& watch = xy_home_limit_watch;
+  if (!watch.armed) return false;
+  if (watch.watch_x &&
+      (safety_manager.xLimitActive() || safety_manager.xLimitRawActive())) {
+    watch.hit_x = true;
+  }
+  if (watch.watch_y &&
+      (safety_manager.yLimitActive() || safety_manager.yLimitRawActive())) {
+    watch.hit_y = true;
+  }
+  if (!watch.hit_x && !watch.hit_y) return false;
+  stepper_backend.stop();
+  stepper_backend.waitUntilIdle();
+  updateMachinePositionEstimateFromBackend(reference);
+  return true;
+}
+
 bool waitForMotionOrLimit(const MotionSyncReference& reference) {
   while (stepper_backend.isRunning()) {
     if (stopForAbort("Motion stopped")) {
@@ -294,6 +328,10 @@ bool waitForMotionOrLimit(const MotionSyncReference& reference) {
       logMessage("Motion stopped: alarm reason=%s", safety_manager.alarmReason());
       return false;
     }
+    if (stopXYOnHomeLimitHit(reference)) {
+      return false;
+    }
+    safety_manager.logPendingHomeEdgeEvents();
     vTaskDelay(pdMS_TO_TICKS(1));
   }
   updateMachinePositionEstimateFromBackend(reference);
@@ -386,6 +424,9 @@ bool queueTimedSegmentWithRetry(const MotionSegment& segment, bool start,
       postLedStatus(LedStatus::ERROR);
       logMessage("Motion stopped while queueing segment: alarm reason=%s",
                  safety_manager.alarmReason());
+      return false;
+    }
+    if (stopXYOnHomeLimitHit(reference)) {
       return false;
     }
     vTaskDelay(pdMS_TO_TICKS(1));
@@ -766,8 +807,32 @@ XYRunResult executePlannedBlock(MotionBlock& block, size_t index, size_t count) 
   safety_manager.beginNormalMoveLimitReleaseAllowance(
       allow_x_limit_release, allow_y_limit_release, block.start_x_mm,
       block.start_y_mm);
+  // validateMove already refused a move toward a switch that is ON (debounced);
+  // a switch ON at the start is not watched (its release is handled above).
+  xy_home_limit_watch = XYHomeLimitWatch{};
+  xy_home_limit_watch.watch_x =
+      !safety_manager.xLimitActive() && !safety_manager.xLimitRawActive() &&
+      block.dx_mm * static_cast<float>(HOMING_X_DIR) > 0.0f;
+  xy_home_limit_watch.watch_y =
+      !safety_manager.yLimitActive() && !safety_manager.yLimitRawActive() &&
+      block.dy_mm * static_cast<float>(HOMING_Y_DIR) > 0.0f;
+  xy_home_limit_watch.armed =
+      xy_home_limit_watch.watch_x || xy_home_limit_watch.watch_y;
   const XYRunResult executed = executeTimedSegments(segment_queue, block);
+  const bool limit_hit_x = xy_home_limit_watch.hit_x;
+  const bool limit_hit_y = xy_home_limit_watch.hit_y;
+  xy_home_limit_watch = XYHomeLimitWatch{};
   safety_manager.clearNormalMoveLimitReleaseAllowance();
+  if ((limit_hit_x || limit_hit_y) && !safety_manager.isAlarmed()) {
+    // Stopped at the switch like STOP: machine_state holds the backend
+    // position. At the home edge there is no alarm and HOMED stays (#32).
+    setMotionActive(false);
+    logMessage("NACK_XY target=(%.3f,%.3f) reason=%s X=%.3f Y=%.3f",
+               block.target_x_mm, block.target_y_mm,
+               limit_hit_x ? "limit_x" : "limit_y", machine_state.x_mm,
+               machine_state.y_mm);
+    return XYRunResult::STOPPED;
+  }
   if (executed == XYRunResult::STOPPED) {
     // machine_state already holds the backend position where the ramp ended.
     logMessage("NACK_XY target=(%.3f,%.3f) reason=stopped X=%.3f Y=%.3f",
@@ -1651,6 +1716,7 @@ void runJogSession(const JogRequest& first, JogSource first_source) {
     }
     x_was_active = x_active;
     y_was_active = y_active;
+    safety_manager.logPendingHomeEdgeEvents();
     float vx_mm_s = request.vx_mm_s;
     float vy_mm_s = request.vy_mm_s;
     jogClampSpeed(vx_mm_s, vy_mm_s, max_speed_mm_s);
@@ -1878,6 +1944,9 @@ void motionTask(void*) {
   publishStatus();
   CommandMessage command;
   for (;;) {
+    // #32: edge touches found by SafetyManager::poll() (also run by the 2 KB
+    // safetyTask) are logged here, on this task's stack.
+    safety_manager.logPendingHomeEdgeEvents();
     if (isMotionStopRequested() && takeStopCommandLost()) completeStop();
     // Short wait: Serial JOG and the joystick are polled between commands.
     if (!receiveNextCommand(command, pdMS_TO_TICKS(JOY_SESSION_PERIOD_MS))) {
