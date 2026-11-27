@@ -331,6 +331,7 @@ bool waitForMotionOrLimit(const MotionSyncReference& reference) {
     if (stopXYOnHomeLimitHit(reference)) {
       return false;
     }
+    safety_manager.logPendingHomeEdgeEvents();
     vTaskDelay(pdMS_TO_TICKS(1));
   }
   updateMachinePositionEstimateFromBackend(reference);
@@ -1715,6 +1716,7 @@ void runJogSession(const JogRequest& first, JogSource first_source) {
     }
     x_was_active = x_active;
     y_was_active = y_active;
+    safety_manager.logPendingHomeEdgeEvents();
     float vx_mm_s = request.vx_mm_s;
     float vy_mm_s = request.vy_mm_s;
     jogClampSpeed(vx_mm_s, vy_mm_s, max_speed_mm_s);
@@ -1942,6 +1944,9 @@ void motionTask(void*) {
   publishStatus();
   CommandMessage command;
   for (;;) {
+    // #32: edge touches found by SafetyManager::poll() (also run by the 2 KB
+    // safetyTask) are logged here, on this task's stack.
+    safety_manager.logPendingHomeEdgeEvents();
     if (isMotionStopRequested() && takeStopCommandLost()) completeStop();
     // Short wait: Serial JOG and the joystick are polled between commands.
     if (!receiveNextCommand(command, pdMS_TO_TICKS(JOY_SESSION_PERIOD_MS))) {

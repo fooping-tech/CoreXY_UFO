@@ -34,3 +34,16 @@ c++ -std=c++17 -Iinclude -Itest/native \
   -o /tmp/corexy_plotter_native_home_edge_limit_tests
 
 /tmp/corexy_plotter_native_home_edge_limit_tests
+
+# #32: SafetyManager::poll() also runs in safetyTask (2 KB stack). logMessage()
+# or float formatting there overflowed it (Double exception in _dtoa_r).
+awk '/^void SafetyManager::poll\(\)/{f=1} f{print} f&&/^}/{exit}' src/SafetyManager.cpp \
+  > /tmp/corexy_safety_poll_body.txt
+awk '/^bool SafetyManager::pollHomeEdge\(/{f=1} f{print} f&&/^}/{exit}' src/SafetyManager.cpp \
+  >> /tmp/corexy_safety_poll_body.txt
+if [ ! -s /tmp/corexy_safety_poll_body.txt ] || \
+   grep -nE 'logMessage|%[-+ 0-9.]*[fFeEgG]' /tmp/corexy_safety_poll_body.txt; then
+  echo "FAILED: SafetyManager::poll()/pollHomeEdge() must not log or format floats"
+  exit 1
+fi
+echo "safety poll logging check passed"

@@ -32,5 +32,11 @@ HOME直後はX・Yともlimitが0点でONのままなので、`LIMIT edge axis=X
 6. `XY 100 0 F6000`(Y の端へ)。位置がずれていなければ`ACK_XY`、ずれていてlimitが先にONになれば
    `NACK_XY ... reason=limit_y X=.. Y=..`。どちらでもアラームにならない。
 
+7. X の端への XY(2026-11-27 にここでリブートした): `XY 30 100 3000`、続けて `XY 0 100 600`。
+   - `NACK_XY target=(0.000,100.000) reason=limit_x X=.. Y=100.000`(位置がずれていなければ `ACK_XY`)、
+     その後に `LIMIT edge axis=X X=.. (no alarm)`。
+   - `Guru Meditation Error` や `rst:0xc` のリブートが出ないこと。`POS` が `ALARM=NO HOMED=YES`。
+   - `XY 30 100 3000` で離れて `LIMIT edge released axis=X`。
+
 原点から遠い位置でのアラームは今までどおりなので、ここでは確認しない(手でスイッチを押すと
 `hard limit active away from home`、`ALARM_CLEAR`でHOMEDが外れる)。

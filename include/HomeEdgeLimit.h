@@ -75,3 +75,54 @@ class HomeEdgeLatch {
   bool latched_ = false;
   float touch_mm_ = 0.0f;
 };
+
+// A latch event waiting to be logged. SafetyManager::poll() also runs in
+// safetyTask, whose 2 KB stack overflows on logMessage()/float formatting
+// (2026-11-27: Double exception in _dtoa_r when the X switch was touched).
+// poll() only posts here; motionTask (8 KB) takes and logs it.
+struct HomeEdgeReport {
+  HomeEdgeEvent event = HomeEdgeEvent::NONE;
+  int32_t pos_um = 0;
+  int32_t moved_um = 0;
+};
+
+class HomeEdgeReportSlot {
+ public:
+  // No formatting, no allocation: safe from any task. A newer event replaces
+  // one that was not taken yet.
+  void post(HomeEdgeEvent event, float pos_mm, float moved_mm) {
+    pending_ = false;
+    report_.event = event;
+    report_.pos_um = homeEdgeMicrometres(pos_mm);
+    report_.moved_um = homeEdgeMicrometres(moved_mm);
+    pending_ = true;
+  }
+  bool take(HomeEdgeReport& out) {
+    if (!pending_) return false;
+    out = report_;
+    pending_ = false;
+    return true;
+  }
+  static int32_t homeEdgeMicrometres(float mm) {
+    if (!(mm == mm)) return 0;  // NaN
+    const float um = mm * 1000.0f;
+    if (um > 2.0e9f) return 2000000000;
+    if (um < -2.0e9f) return -2000000000;
+    return static_cast<int32_t>(um < 0.0f ? um - 0.5f : um + 0.5f);
+  }
+
+ private:
+  volatile bool pending_ = false;
+  HomeEdgeReport report_;
+};
+
+// "-1.234" from micrometres without float formatting.
+struct HomeEdgeMm3 {
+  const char* sign;
+  long whole;
+  long frac;
+};
+inline HomeEdgeMm3 homeEdgeMm3(int32_t um) {
+  const long magnitude = um < 0 ? -static_cast<long>(um) : static_cast<long>(um);
+  return HomeEdgeMm3{um < 0 ? "-" : "", magnitude / 1000, magnitude % 1000};
+}

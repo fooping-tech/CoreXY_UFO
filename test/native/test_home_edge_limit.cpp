@@ -1,6 +1,8 @@
 // #32: a home switch ON near the home edge is the end of the stage (no alarm);
 // farther away it is a lost position (alarm).
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 
 #include "HomeEdgeLimit.h"
@@ -73,6 +75,36 @@ void testAwayFromHome() {
   require(!latch.latched(), "reset clears");
 }
 
+void testReportSlot() {
+  HomeEdgeReportSlot slot;
+  HomeEdgeReport out;
+  require(!slot.take(out), "empty slot gives nothing");
+  slot.post(HomeEdgeEvent::TOUCHED, 0.715f, 0.0f);
+  require(slot.take(out) && out.event == HomeEdgeEvent::TOUCHED && out.pos_um == 715,
+          "posted touch is taken once with micrometres");
+  require(!slot.take(out), "taken event is gone");
+  slot.post(HomeEdgeEvent::TOUCHED, 1.0f, 0.0f);
+  slot.post(HomeEdgeEvent::RELEASED, 13.2f, 12.2f);
+  require(slot.take(out) && out.event == HomeEdgeEvent::RELEASED && out.pos_um == 13200 &&
+              out.moved_um == 12200,
+          "a newer event replaces one not taken yet");
+  require(HomeEdgeReportSlot::homeEdgeMicrometres(-0.0004f) == 0, "rounds to nearest");
+  require(HomeEdgeReportSlot::homeEdgeMicrometres(-2.5f) == -2500, "negative");
+}
+
+void testMm3() {
+  char text[32];
+  const HomeEdgeMm3 a = homeEdgeMm3(715);
+  std::snprintf(text, sizeof(text), "%s%ld.%03ld", a.sign, a.whole, a.frac);
+  require(std::strcmp(text, "0.715") == 0, "0.715 printed without float formatting");
+  const HomeEdgeMm3 b = homeEdgeMm3(-1234);
+  std::snprintf(text, sizeof(text), "%s%ld.%03ld", b.sign, b.whole, b.frac);
+  require(std::strcmp(text, "-1.234") == 0, "negative mm");
+  const HomeEdgeMm3 c = homeEdgeMm3(231640);
+  std::snprintf(text, sizeof(text), "%s%ld.%03ld", c.sign, c.whole, c.frac);
+  require(std::strcmp(text, "231.640") == 0, "leading zeros of the fraction kept");
+}
+
 }  // namespace
 
 int main() {
@@ -80,6 +112,8 @@ int main() {
   testTouchAndRelease();
   testNotReleased();
   testAwayFromHome();
+  testReportSlot();
+  testMm3();
   std::cout << "home edge limit tests passed\n";
   return 0;
 }
