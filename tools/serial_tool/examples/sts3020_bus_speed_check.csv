@@ -1,0 +1,10 @@
+command,delay_ms,expect,comment
+BAUD 1000000,1000,Host UART baud=1000000,SETUP: both servos still at the factory 1 Mbps. Z arm lowered or supported (SET_BAUD cuts torque). Core2 side only
+SCAN,2500,2 servo(s) found,ID 1 and ID 2 both answer at 1 Mbps before anything is written
+ID 1,1000,Servo detected: ID=1,Select the Z drum servo
+SET_BAUD 250000,2500,SET_BAUD OK: ID=1 answers at 250000,Write ID 1 EEPROM baud; host UART follows to 250000
+BAUD 1000000,1000,Host UART baud=1000000,Back to 1 Mbps to reach ID 2 (PING FAILED for ID 1 here is expected)
+ID 2,1000,Servo detected: ID=2,Select the arm servo
+SET_BAUD 250000,2500,SET_BAUD OK: ID=2 answers at 250000,Write ID 2 EEPROM baud; host UART follows to 250000
+SCAN,2500,2 servo(s) found,Both servos answer at 250000
+STATUS,1500,Baud reg    : 2 (250000),Stored baud register of the selected servo

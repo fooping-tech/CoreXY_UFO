@@ -20,15 +20,19 @@ constexpr uint8_t STS_TEST_UART_TX_PIN = 32;
 constexpr uint8_t STS_TEST_UART_RX_PIN = 33;
 // Bus speed used by this project (Issue #34). Must match PEN_SERVO_UART_BAUD
 // and the baud register (EEPROM address 6) of every servo on the bus.
-constexpr uint32_t STS_TEST_UART_BAUD = 500000;
-// Speed of a servo as shipped. Tried at boot when the project speed gets no
-// reply, and accepted by BAUD / SET_BAUD.
+constexpr uint32_t STS_TEST_UART_BAUD = 250000;
+// Speed of a servo as shipped.
 constexpr uint32_t STS_TEST_UART_BAUD_FACTORY = 1000000;
+// Speeds accepted by BAUD / SET_BAUD. At boot they are tried in this order
+// (PING only) until the selected servo answers.
+constexpr uint32_t STS_TEST_UART_BAUDS[] = {STS_TEST_UART_BAUD, STS_TEST_UART_BAUD_FACTORY,
+                                            500000};
+constexpr char STS_TEST_UART_BAUDS_TEXT[] = "250000 / 500000 / 1000000";
 // Wait after a baud write or a host UART restart before the next packet [ms].
 constexpr uint32_t STS_TEST_BAUD_SWITCH_SETTLE_MS = 20;
 // SET_BAUD: PING attempts at the new speed before giving up.
 constexpr int STS_TEST_SET_BAUD_VERIFY_PINGS = 3;
-// Reply wait per transaction [ms]. A 500 kbps reply arrives well under 1 ms.
+// Reply wait per transaction [ms]. A 250 kbps reply arrives within about 1 ms.
 constexpr uint32_t STS_TEST_UART_IO_TIMEOUT_MS = 20;
 
 // Factory default ID is normally 1. Selected at runtime with the ID command.

@@ -136,6 +136,7 @@ python tools/serial_tool/serial_send.py \
 | [Servo Feedback Recover Check](docs/servo-feedback-recover-check.md) | 受信の雑音でサーボの返事が途切れても、戻ったら回転の数を取り戻す(#30) | `examples/servo_feedback_recover_check.csv` |
 | [WebUI Test Mode Check](docs/webui-test-mode-check.md) | WebUI `Test`タブ/Serialでホーミングなしのリミット確認、モータ・X/Y移動、サーボID1/2の角度・回転 | `examples/webui_test_mode_check.csv` |
 | [STS3020 Standalone Test Check](docs/sts3020-test-check.md) | STS3020単体の通信・微小JOG確認(専用`m5stack-core2-sts3020-test` firmware) | `examples/sts3020_test_check.csv` |
+| [STS3020 Bus Speed](docs/sts3020-test-check.md) | サーボのEEPROMの通信速度を250 kbpsへ書き換える(`SET_BAUD`、同じ専用firmware。**EEPROMを書き換える**) | `examples/sts3020_bus_speed_check.csv` |
 | [Melody Check](docs/melody-check.md) | TMC UART、Aモータ、診断メロディprofile | `examples/melody_check.csv` |
 
 設定変更が必要な場合は、該当ドキュメントに従って`include/PlotterConfig.h`を編集し、再ビルド・再書き込みしてください。

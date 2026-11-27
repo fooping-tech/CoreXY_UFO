@@ -2833,12 +2833,13 @@ HANDOFF §7への回答(ゲーム側へ返す内容):
 - [ ] 実機: 候補の判定(レビュー #31 の修正)と、手前で止まった爪の再設定
 - [ ] 5 s を超える雑音(ミストでは約 15 s)は従来どおり失敗する。雑音そのものはハードウェアで対策する(R42)
 
-## 2026-11-27: サーボバスの通信速度を500 kbpsへ (#34)
+## 2026-11-27: サーボバスの通信速度を250 kbpsへ (#34)
 
-- [x] `PEN_SERVO_UART_BAUD`、`STS_TEST_UART_BAUD` 1000000 → 500000
+- [x] `PEN_SERVO_UART_BAUD`、`STS_TEST_UART_BAUD` 1000000 → 250000
 - [x] 単体テストファームウェアに`BAUD [n]`、`SET_BAUD <n>`、起動時の1 Mbpsへの切替、`STATUS`の`Host baud` / `Baud reg`
+- [x] チェックCSV `sts3020_bus_speed_check.csv`
 - [x] 手順書(`sts3020-test-check.md`「Bus Speed」)、SPEC / README / AGENTS の記述
-- [ ] 実機: ID 1(Z)とID 2(アーム)を`SET_BAUD 500000`で書き換え、サーボ電源の入れ直し後も500 kbpsで応答する
+- [ ] 実機: ID 1(Z)とID 2(アーム)を`SET_BAUD 250000`で書き換え、サーボ電源の入れ直し後も250 kbpsで応答する
 - [ ] 実機: 本体ファームウェアで`SERVO_STATUS`が両方のIDで応答し、Zの上下と爪の開閉ができる
 - [ ] 実機: `NO_REPLY`(ミスト、XY移動後)が減るかを`SDIAG`で比べる
 

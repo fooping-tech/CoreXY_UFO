@@ -97,11 +97,8 @@ void printPingFailureHints() {
   Serial.println("  Possible causes:");
   Serial.printf("  - Servo ID is not %u (see broadcast result above)\n",
                 servo_id);
-  Serial.printf("  - Servo baud is not %lu (try BAUD %lu, then PING)\n",
-                static_cast<unsigned long>(uart_baud),
-                static_cast<unsigned long>(uart_baud == STS_TEST_UART_BAUD
-                                               ? STS_TEST_UART_BAUD_FACTORY
-                                               : STS_TEST_UART_BAUD));
+  Serial.printf("  - Servo baud is not %lu (try BAUD <%s>, then PING)\n",
+                static_cast<unsigned long>(uart_baud), STS_TEST_UART_BAUDS_TEXT);
   Serial.printf("  - UART pins: TX=GPIO%u RX=GPIO%u (Core2 Port A) swapped or loose\n",
                 STS_TEST_UART_TX_PIN, STS_TEST_UART_RX_PIN);
   Serial.println("  - Bus servo adapter missing/unpowered (half-duplex required)");
@@ -110,21 +107,19 @@ void printPingFailureHints() {
 
 // Servo EEPROM baud register values this firmware accepts (FTServo INST.h).
 bool baudToIndex(uint32_t baud, uint8_t& index) {
-  if (baud == STS_TEST_UART_BAUD_FACTORY) {
-    index = _1M;
-    return true;
+  switch (baud) {
+    case 1000000: index = _1M; return true;
+    case 500000: index = _0_5M; return true;
+    case 250000: index = _250K; return true;
+    default: return false;
   }
-  if (baud == STS_TEST_UART_BAUD) {
-    index = _0_5M;
-    return true;
-  }
-  return false;
 }
 
 const char* baudIndexName(int index) {
   switch (index) {
     case _1M: return "1000000";
     case _0_5M: return "500000";
+    case _250K: return "250000";
     default: return "other - not supported by this firmware";
   }
 }
@@ -227,7 +222,7 @@ void cmdHelp() {
   Serial.println("  ID <n>         Select the servo ID used by all commands");
   Serial.println("  SET_ID <n>     Change the selected servo's ID (EEPROM, persistent)");
   Serial.println("                 Connect ONLY that servo to the bus first.");
-  Serial.println("Bus speed (1000000 or 500000):");
+  Serial.println("Bus speed (250000 / 500000 / 1000000):");
   Serial.println("  BAUD [n]       Show / switch the Core2 UART speed (servo unchanged)");
   Serial.println("  SET_BAUD <n>   Change the selected servo's baud (EEPROM, persistent)");
   Serial.println("Multi-turn bench test (no load):");
@@ -942,10 +937,8 @@ void cmdSetId(const char* arg) {
 void cmdBaud(const char* arg) {
   uint32_t baud = 0;
   if (!parseBaud(arg, baud)) {
-    Serial.printf("BAUD: host UART at %lu (usage BAUD %lu / BAUD %lu)\n",
-                  static_cast<unsigned long>(uart_baud),
-                  static_cast<unsigned long>(STS_TEST_UART_BAUD),
-                  static_cast<unsigned long>(STS_TEST_UART_BAUD_FACTORY));
+    Serial.printf("BAUD: host UART at %lu (usage BAUD <%s>)\n",
+                  static_cast<unsigned long>(uart_baud), STS_TEST_UART_BAUDS_TEXT);
     return;
   }
   if (baud != uart_baud && mt_tracking_valid) {
@@ -966,9 +959,7 @@ void cmdSetBaud(const char* arg) {
   uint32_t new_baud = 0;
   uint8_t new_index = 0;
   if (!parseBaud(arg, new_baud) || !baudToIndex(new_baud, new_index)) {
-    Serial.printf("SET_BAUD REJECTED: usage SET_BAUD %lu / SET_BAUD %lu\n",
-                  static_cast<unsigned long>(STS_TEST_UART_BAUD),
-                  static_cast<unsigned long>(STS_TEST_UART_BAUD_FACTORY));
+    Serial.printf("SET_BAUD REJECTED: usage SET_BAUD <%s>\n", STS_TEST_UART_BAUDS_TEXT);
     return;
   }
   const uint32_t old_baud = uart_baud;
@@ -1280,16 +1271,20 @@ void setup() {
   // and nothing is written. A servo still at the factory speed is found by
   // PING at that speed, so it can be reached for SET_BAUD.
   if (!ping(false)) {
-    setHostBaud(STS_TEST_UART_BAUD_FACTORY);
-    if (ping(false)) {
+    bool found = false;
+    for (const uint32_t baud : STS_TEST_UART_BAUDS) {
+      if (baud == STS_TEST_UART_BAUD) continue;
+      setHostBaud(baud);
+      if (!ping(false)) continue;
+      found = true;
       Serial.printf("No reply at %lu. Servo answers at %lu: host UART switched.\n",
                     static_cast<unsigned long>(STS_TEST_UART_BAUD),
-                    static_cast<unsigned long>(STS_TEST_UART_BAUD_FACTORY));
+                    static_cast<unsigned long>(baud));
       Serial.printf("  Use SET_BAUD %lu to change this servo.\n",
                     static_cast<unsigned long>(STS_TEST_UART_BAUD));
-    } else {
-      setHostBaud(STS_TEST_UART_BAUD);
+      break;
     }
+    if (!found) setHostBaud(STS_TEST_UART_BAUD);
   }
   cmdPing();
   Serial.println();

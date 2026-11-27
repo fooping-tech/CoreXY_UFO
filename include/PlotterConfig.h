@@ -154,11 +154,11 @@ constexpr uint32_t DIR_CHANGE_DELAY_US = 200;
 // FEETECH STS3020 half-duplex TTL bus servo (external UART adapter required).
 // Factory defaults are normally ID 1 and 1 Mbps; verify on the real device.
 constexpr uint8_t PEN_SERVO_ID = 1;
-// サーボバスの通信速度 [bps]。500 kbps(Issue #34、工場出荷時は1 Mbps)。
+// サーボバスの通信速度 [bps]。250 kbps(Issue #34、工場出荷時は1 Mbps)。
 // バス上の全サーボのEEPROM(baud、アドレス6)が同じ値でないと応答しない。
 // サーボ側の書き換えは単体テストファームウェアのSET_BAUD
 // (tools/serial_tool/docs/sts3020-test-check.md)。
-constexpr uint32_t PEN_SERVO_UART_BAUD = 500000;
+constexpr uint32_t PEN_SERVO_UART_BAUD = 250000;
 constexpr uint16_t PEN_SERVO_SPEED = 300;
 constexpr uint8_t PEN_SERVO_ACCELERATION = 20;
 // Stop after a bounded delay instead of allowing XY to start with an unknown pen position.
