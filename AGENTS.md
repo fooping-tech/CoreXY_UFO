@@ -93,7 +93,7 @@ Core2はESP32を搭載しており、2Core構成である。
 | TMC UART | `TMC_UART_RX_PIN` | 13 | ESP32 RX ← TMC2209 PDN_UART |
 | Xリミット | `X_LIMIT_PIN` | 36 | 入力専用。外付けpull-up推奨 |
 | Yリミット | `Y_LIMIT_PIN` | 35 | 入力専用。外付けpull-up推奨 |
-| ペンUART TX | `PEN_SERVO_UART_TX_PIN` | 32 | Serial1 1Mbps、半二重TTL変換アダプタ経由 |
+| ペンUART TX | `PEN_SERVO_UART_TX_PIN` | 32 | Serial1 500kbps(`PEN_SERVO_UART_BAUD`)、半二重TTL変換アダプタ経由 |
 | ペンUART RX | `PEN_SERVO_UART_RX_PIN` | 33 | Serial1 RX、NeoPixel出力無効 |
 
 注意:

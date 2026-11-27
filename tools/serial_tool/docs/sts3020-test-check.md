@@ -52,6 +52,8 @@ PING/READ/STATUSが失敗、または`Servo error flags`が`none`以外の場合
 | `SCAN` | ID 0..20へPINGし応答IDを一覧。壊れた応答はID重複の可能性として表示 |
 | `ID <n>` | 以降の全コマンドの対象IDを切替(起動時ID=1)。LCDにも表示 |
 | `SET_ID <n>` | 選択中サーボのIDを変更(EEPROM保存)。**対象1台だけ接続**した状態で実行。複数台応答時は拒否 |
+| `BAUD [n]` | Core2側のUART速度を表示 / 切替(`1000000`か`500000`)。サーボは書き換えない。切替後にPING |
+| `SET_BAUD <n>` | 選択中サーボの通信速度を変更(EEPROM保存、`1000000`か`500000`)。下の「Bus Speed」を参照 |
 | `MT_ON` / `MT_JOG <+/-n>` / `MT_OFF` | 多回転位置制御の試験(負荷なし専用)。詳細はSPEC.md |
 
 ID設定手順は[README.md](../../../README.md)の「STS3020 servo ID setup」を参照。
@@ -95,7 +97,7 @@ LCDに位置、Torque、Link、電圧、servo error flags、直前の結果(`Las
 
 | Step | What to confirm |
 |---|---|
-| 起動ログ | `TX: GPIO32`、`RX: GPIO33`、`Baud: 1000000`、`Servo detected: ID=1`。起動時に動かない |
+| 起動ログ | `TX: GPIO32`、`RX: GPIO33`、`Baud: 500000`、`Servo detected: ID=1`。起動時に動かない。工場出荷時(1 Mbps)のサーボでは`No reply at 500000. Servo answers at 1000000: host UART switched.`と出る |
 | `PING` | `Servo detected: ID=1`、`Servo error flags: 0x00 (none)` |
 | `READ` | `Position:`が0..4095。JOG±30には100+30..3995-30付近が必要 |
 | `STATUS` | `Mode: 0 (position)`、`Voltage`が`Min voltage`..`Max voltage`内、温度が常温 |
@@ -108,7 +110,45 @@ LCDに位置、Torque、Link、電圧、servo error flags、直前の結果(`Las
 - `Servo error flags: 0x01 VOLTAGE`: 電源電圧がEEPROMの`Max voltage`/`Min voltage`外。電源電圧をサーボ定格に合わせる。EEPROM制限値を書き換えて回避しない
 - `Position`が100未満または3995超: トルクOFFの状態で出力軸を手で中央(約2048)付近へ回してから再試行。硬くて回せない場合は、範囲内へ戻る向きに`JOG -100`(4095付近)または`JOG +100`(0付近)を1回実行してから±30を行う
 - 実機確認済み電源は約8.0V。12VではVOLTAGE flag(EEPROM上限10.0V超)
-- `PING FAILED`: 表示される原因候補(ID、baud、TX/RX、アダプタ電源、サーボ電源、共通GND)を確認
+- `PING FAILED`: 表示される原因候補(ID、baud、TX/RX、アダプタ電源、サーボ電源、共通GND)を確認。速度の違いは`BAUD 1000000` / `BAUD 500000`で切り替えて`PING`
+
+## Bus Speed (500 kbps、Issue #34)
+
+サーボバスは500,000 bpsで使う(工場出荷時は1,000,000 bps)。Core2側の速度(`PEN_SERVO_UART_BAUD`、
+`STS_TEST_UART_BAUD`)と、バス上の全サーボのEEPROM(baud、アドレス6)が同じでないと応答しない。
+
+**順番を守る**: このテストファームウェアで全サーボを書き換える → 本体ファームウェア(500 kbps)を書き込む。
+先に本体だけ500 kbpsにすると、Zとアームが応答しなくなる。
+
+- 起動時、500 kbpsでPINGに応答がなければ1 Mbpsでも1回PINGし、応答した速度を使う(書込みはしない)。
+- `SET_BAUD`はIDを指定して1台だけ書くので、全サーボを接続したままでよい。
+- `SET_BAUD`の流れ: 選択IDへのPING 10回連続成功 → torque OFF → EEPROM unlock → baud書込み →
+  Core2側を新しい速度へ切替 → PING(最大3回) → EEPROM lock。
+- 新しい速度で応答がなければCore2側を元の速度へ戻し、結果を表示する:
+  `SET_BAUD WRITTEN`(値は入ったが元の速度で応答。サーボ電源の入れ直しが必要)、
+  `SET_BAUD FAILED`(値が入っていない、またはどちらの速度でも応答なし)。
+- トルクがOFFになる。**Z(ID 1)はドラムが重みで回るので、アームを下げきるか支えてから行う。**
+  終わったら巻き上げの点(`z_set top` / `bottom`)を記録し直す。
+
+```text
+(起動)            # No reply at 500000. Servo answers at 1000000: host UART switched.
+SCAN              # ID=1、ID=2 が found
+ID 1
+SET_BAUD 500000   # SET_BAUD OK: ID=1 answers at 500000 (EEPROM relock OK)
+BAUD 1000000      # まだ1 MbpsのID 2と話すため、Core2側を戻す(ID 1はPING FAILEDで正しい)
+ID 2              # Servo detected: ID=2
+SET_BAUD 500000   # SET_BAUD OK: ID=2 answers at 500000
+SCAN              # 500 kbpsでID=1、ID=2が found
+STATUS            # Host baud: 500000、Baud reg: 1 (500000)、EEPROM lock: 1 (locked)
+```
+
+その後、サーボ電源を入れ直して`SCAN`でもう一度応答を確認し(EEPROMに保存されたことの確認)、
+本体ファームウェアを書き込んで`SERVO_STATUS`が両方のIDで応答することを確認する。
+
+1 Mbpsへ戻すときは同じ手順で`SET_BAUD 1000000`(先に`BAUD 500000`でそのサーボと話せること)、
+本体の`PEN_SERVO_UART_BAUD`も1000000に戻す。
+
+実機未確認(2026-11-27時点): 書込みが電源の入れ直しなしで有効になるか、500 kbpsで`NO_REPLY`が減るか。
 
 ## Multi-turn Check (負荷なし専用)
 
