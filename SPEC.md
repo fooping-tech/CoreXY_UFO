@@ -1466,7 +1466,7 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 ## 2026-11-26: サーボの移動中の電圧・電流・状態の記録(Issue #28、調査用)
 
 - 背景: ゲームのかんたんモードで、カプセルを握った爪(ID 2)を Dial の上で開くたびに`SERVO_TURN 2 ... result=FAILED reason=feedback_lost tracking=INVALID`で止まった。電源か配線・ノイズかを分けるための記録。判定(250 msの読出し欠落、runaway、許容差)は変えない。
-- `moveRelative`の監視ループで、位置の読出しが成功するたびに`FeedBack()`(PRESENT_POSITION_L から PRESENT_CURRENT_H まで 15 バイト)をもう 1 回読む。直近 36 個をリングバッファに持つ。1 Mbps で 1 回の poll(20 ms)につき 1 回の読出しが増える。
+- `moveRelative`の監視ループで、位置の読出しが成功するたびに`FeedBack()`(PRESENT_POSITION_L から PRESENT_CURRENT_H まで 15 バイト)をもう 1 回読む。直近 36 個をリングバッファに持つ。1 回の poll(20 ms)につき 1 回の読出しが増える(250 kbps で往復約 1 ms)。
   - 電圧: 0.1 V 単位。電流: 生の値(約 6.5 mA/単位)。負荷: 0.1 % 単位、符号付き。応答の状態バイト: bit0 電圧、bit1 センサー、bit2 温度、bit3 電流、bit5 過負荷。温度: ℃。
   - 読めなかったサンプルは FTServo のエラー(1 無応答、2 CRC、3 ID 違い、4 長さ)を持つ。位置は読めて FeedBack だけ失敗したら 10 + エラー。
 - 出力(ホストは`SDIAG`で始まる行を知らないログとして扱う。`SERVO_TURN`/`SERVO_STATUS`の解析には当たらない):
@@ -1491,3 +1491,17 @@ Serial Toolは`NACK`、`REJECT:`、`ALARM=YES`、`machine is alarmed`、`ERROR:`
 - 雑音が続く間は、STOP / ABORT もサーボに届かない(従来と同じ)。待つのは 5 s までなので、それより長い雑音(ミストでは約 15 s)は従来どおり失敗する。
 - 実機結果(2026-11-26): ミストの雑音で約 4.5 s 返事がなかった爪の開きが`recovered=YES gap_ms=4494`で`PASS`(abs=1247、目標 1245)。候補の判定(レビュー #31 の修正)と`enableTracking`の許容の拡大は実機未確認。
 
+## 2026-11-27: サーボバスの通信速度を250 kbpsへ(Issue #34)
+
+- サーボバス(UART1、GPIO32/33)の通信速度を1 Mbpsから250,000 bpsへ下げる。`PEN_SERVO_UART_BAUD`(本体・hwtest)と`STS_TEST_UART_BAUD`(単体テスト)。これより前の節の「1Mbps」は当時の値。
+- 目的: ミストの雑音や XY 移動後の`NO_REPLY`に対する通信の余裕。効果は実機未確認(配線・電源が原因なら変わらない)。
+- サーボ側のEEPROM(baud、アドレス6。FTServoの`_1M`=0、`_0_5M`=1、`_250K`=2)も同じ値が必要。本体ファームウェアはサーボのEEPROMを書かない。書き換えは単体テストファームウェアだけが行う。
+- 単体テストファームウェア:
+  - `BAUD [n]`: Core2側のUART速度の表示・切替(250000 / 500000 / 1000000)。サーボは書かない。
+  - `SET_BAUD <n>`: 選択IDへのPING 10回連続成功 → torque OFF → EEPROM unlock → baud書込み → Core2側を新しい速度へ → PING(最大3回) → EEPROM lock。応答がなければCore2側を元の速度へ戻し、`SET_BAUD WRITTEN`(値は入ったが元の速度で応答。電源の入れ直しが必要)か`SET_BAUD FAILED`を表示する。
+  - 起動時、250 kbpsでPINGに応答がなければ1 Mbps、500 kbpsの順にPINGし、応答した速度を使う(書込みなし)。
+  - `STATUS`に`Host baud`と`Baud reg`を表示。
+- 読出しのtimeout(本体10 ms、単体テスト20 ms)と受信の読み捨ての上限(2 ms)は変えない。250 kbpsでも1往復は約1 ms。
+- 書込みの順番: 単体テストファームウェアで全サーボを書き換える → 本体ファームウェアを書き込む。逆にするとZとアームが応答しない。
+- `SET_BAUD`はトルクをOFFにする。Z(ID 1)は重みでドラムが回るので、アームを下げきるか支えてから行い、後で巻き上げの点を記録し直す。
+- 手順書: `tools/serial_tool/docs/sts3020-test-check.md`の「Bus Speed」

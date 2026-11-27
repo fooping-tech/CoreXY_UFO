@@ -16,7 +16,7 @@
 - 共通GND。UART信号は3.3V MCUに適合する変換基板を使い、サーボ信号線をESP32へ直接接続しない。
 - TMC2209は従来どおりSerial2（GPIO14 TX / GPIO13 RX）を使い、STS3020専用はSerial1。
 - GPIO33のNeoPixelは切断する（firmwareはGPIO出力禁止）。旧LEDチェックCSVは使用しない。
-- ID 1、1Mbps、ポジションモード前提。変更されている個体は先にFEETECHの設定ツールで確認する。
+- ID 1、250kbps(Issue #34。工場出荷時は1Mbpsなので、先に単体テストファームウェアの`SET_BAUD 250000`で書き換える。手順は`sts3020-test-check.md`の「Bus Speed」)、ポジションモード前提。
 - 初回はホーンを外し、指を挟まないよう可動部をフリーにする。
 
 ## Build / run
@@ -31,7 +31,7 @@ python tools/serial_tool/serial_send.py --port /dev/cu.usbserial-XXXX --csv tool
 
 ## Commands and expected behavior
 
-1. `CONFIG`: UART TX=32 RX=33、baud=1000000、ID=1、NeoPixel=DISABLED。
+1. `CONFIG`: UART TX=32 RX=33、baud=250000、ID=1、NeoPixel=DISABLED。
 2. `PEN_STATUS`: `PEN_STATUS OK id=1 position=...`。これは移動なしの現在位置読出し。
 3. `SELFTEST`: CoreXY計算のチェックのみ。サーボ移動なし。
 4. `PENUP`: 60度相当の目標値を送信し、`PEN UP` を返す。ホーンなしで動作を確認する。

@@ -33,6 +33,10 @@ size_t line_length = 0;
 // Active servo ID for all commands. Changed with ID <n>.
 uint8_t servo_id = STS_TEST_DEFAULT_SERVO_ID;
 
+// Host UART speed in use. Changed with BAUD <n>, by a successful SET_BAUD, and
+// at boot when the servo only answers at the factory speed.
+uint32_t uart_baud = STS_TEST_UART_BAUD;
+
 // Short result of the last Serial/touch command, shown on the LCD.
 char last_result[40] = "-";
 
@@ -93,12 +97,53 @@ void printPingFailureHints() {
   Serial.println("  Possible causes:");
   Serial.printf("  - Servo ID is not %u (see broadcast result above)\n",
                 servo_id);
-  Serial.printf("  - Servo baud is not %lu\n",
-                static_cast<unsigned long>(STS_TEST_UART_BAUD));
+  Serial.printf("  - Servo baud is not %lu (try BAUD <%s>, then PING)\n",
+                static_cast<unsigned long>(uart_baud), STS_TEST_UART_BAUDS_TEXT);
   Serial.printf("  - UART pins: TX=GPIO%u RX=GPIO%u (Core2 Port A) swapped or loose\n",
                 STS_TEST_UART_TX_PIN, STS_TEST_UART_RX_PIN);
   Serial.println("  - Bus servo adapter missing/unpowered (half-duplex required)");
   Serial.println("  - Servo external supply off, or GND not shared with Core2");
+}
+
+// Servo EEPROM baud register values this firmware accepts (FTServo INST.h).
+bool baudToIndex(uint32_t baud, uint8_t& index) {
+  switch (baud) {
+    case 1000000: index = _1M; return true;
+    case 500000: index = _0_5M; return true;
+    case 250000: index = _250K; return true;
+    default: return false;
+  }
+}
+
+const char* baudIndexName(int index) {
+  switch (index) {
+    case _1M: return "1000000";
+    case _0_5M: return "500000";
+    case _250K: return "250000";
+    default: return "other - not supported by this firmware";
+  }
+}
+
+// Switch the Core2 side only. The servo keeps its own EEPROM setting.
+void setHostBaud(uint32_t baud) {
+  servo_serial.flush();
+  servo_serial.end();
+  servo_serial.begin(baud, SERIAL_8N1, STS_TEST_UART_RX_PIN, STS_TEST_UART_TX_PIN);
+  delay(STS_TEST_BAUD_SWITCH_SETTLE_MS);
+  while (servo_serial.read() != -1) {
+  }
+  uart_baud = baud;
+}
+
+bool parseBaud(const char* text, uint32_t& baud) {
+  if (text == nullptr || *text == '\0') return false;
+  char* end = nullptr;
+  const unsigned long value = strtoul(text, &end, 10);
+  if (end == text || *end != '\0') return false;
+  uint8_t index = 0;
+  if (!baudToIndex(static_cast<uint32_t>(value), index)) return false;
+  baud = static_cast<uint32_t>(value);
+  return true;
 }
 
 bool readPosition(int& position_counts) {
@@ -177,6 +222,9 @@ void cmdHelp() {
   Serial.println("  ID <n>         Select the servo ID used by all commands");
   Serial.println("  SET_ID <n>     Change the selected servo's ID (EEPROM, persistent)");
   Serial.println("                 Connect ONLY that servo to the bus first.");
+  Serial.println("Bus speed (250000 / 500000 / 1000000):");
+  Serial.println("  BAUD [n]       Show / switch the Core2 UART speed (servo unchanged)");
+  Serial.println("  SET_BAUD <n>   Change the selected servo's baud (EEPROM, persistent)");
   Serial.println("Multi-turn bench test (no load):");
   Serial.println("  MT_ON          Angle limits 0/0 (temporary, EEPROM stays locked)");
   Serial.printf("  MT_JOG <+/-n>  Multi-turn move n counts (|n|<=%d, 4096=1 turn)\n",
@@ -215,6 +263,13 @@ void cmdStatus() {
   Serial.println("STATUS...");
   if (!ping(true)) return;
   Serial.printf("  %-12s: %u\n", "ID", servo_id);
+  Serial.printf("  %-12s: %lu\n", "Host baud", static_cast<unsigned long>(uart_baud));
+  const int baud_index = servo.readByte(servo_id, SMS_STS_BAUD_RATE);
+  if (baud_index < 0) {
+    Serial.printf("  %-12s: read failed\n", "Baud reg");
+  } else {
+    Serial.printf("  %-12s: %d (%s)\n", "Baud reg", baud_index, baudIndexName(baud_index));
+  }
   const int model = servo.readWord(servo_id, SMS_STS_MODEL_L);
   printReadResult("Model", model, "%.0f", 1.0f);
   const int mode = servo.readByte(servo_id, SMS_STS_MODE);
@@ -879,6 +934,108 @@ void cmdSetId(const char* arg) {
   snprintf(last_result, sizeof(last_result), "SET_ID %u OK", new_id);
 }
 
+void cmdBaud(const char* arg) {
+  uint32_t baud = 0;
+  if (!parseBaud(arg, baud)) {
+    Serial.printf("BAUD: host UART at %lu (usage BAUD <%s>)\n",
+                  static_cast<unsigned long>(uart_baud), STS_TEST_UART_BAUDS_TEXT);
+    return;
+  }
+  if (baud != uart_baud && mt_tracking_valid) {
+    mt_tracking_valid = false;
+    Serial.println("  Multi-turn tracking invalidated (bus speed changed)");
+  }
+  setHostBaud(baud);
+  Serial.printf("Host UART baud=%lu (servo EEPROM not changed)\n",
+                static_cast<unsigned long>(uart_baud));
+  ping(true);
+  snprintf(last_result, sizeof(last_result), "BAUD %lu", static_cast<unsigned long>(uart_baud));
+}
+
+// Writes the servo's EEPROM baud register, then follows it with the host UART.
+// Other servos on the bus keep their speed: they are addressed by ID, so only
+// the selected one is written.
+void cmdSetBaud(const char* arg) {
+  uint32_t new_baud = 0;
+  uint8_t new_index = 0;
+  if (!parseBaud(arg, new_baud) || !baudToIndex(new_baud, new_index)) {
+    Serial.printf("SET_BAUD REJECTED: usage SET_BAUD <%s>\n", STS_TEST_UART_BAUDS_TEXT);
+    return;
+  }
+  const uint32_t old_baud = uart_baud;
+  Serial.printf("SET_BAUD ID=%u: %lu -> %lu\n", servo_id,
+                static_cast<unsigned long>(old_baud), static_cast<unsigned long>(new_baud));
+  if (new_baud == old_baud) {
+    Serial.println("SET_BAUD REJECTED: host UART is already at this baud");
+    Serial.println("  A servo that answers PING now is already set to it.");
+    return;
+  }
+  for (int i = 0; i < STS_TEST_SET_ID_PING_REPEAT; ++i) {
+    if (servo.Ping(servo_id) != servo_id) {
+      Serial.printf("SET_BAUD REFUSED: PING %d/%d failed (%s)\n", i + 1,
+                    STS_TEST_SET_ID_PING_REPEAT, errorName(servo.getLastError()));
+      snprintf(last_result, sizeof(last_result), "SET_BAUD REFUSED");
+      return;
+    }
+  }
+  if (!servo.EnableTorque(servo_id, 0)) {
+    Serial.println("SET_BAUD ABORTED: torque disable failed");
+    printLastError();
+    return;
+  }
+  mt_tracking_valid = false;
+  if (!servo.unLockEprom(servo_id)) {
+    Serial.println("SET_BAUD ABORTED: EEPROM unlock failed");
+    printLastError();
+    return;
+  }
+  // The servo may answer this write at the new speed, so the ACK may be lost.
+  servo.writeByte(servo_id, SMS_STS_BAUD_RATE, new_index);
+  delay(STS_TEST_BAUD_SWITCH_SETTLE_MS);
+
+  setHostBaud(new_baud);
+  bool new_ok = false;
+  for (int i = 0; i < STS_TEST_SET_BAUD_VERIFY_PINGS && !new_ok; ++i) {
+    new_ok = servo.Ping(servo_id) == servo_id;
+  }
+  if (new_ok) {
+    const bool locked = servo.LockEprom(servo_id) != 0;
+    Serial.printf("SET_BAUD OK: ID=%u answers at %lu (EEPROM relock %s)\n", servo_id,
+                  static_cast<unsigned long>(new_baud), locked ? "OK" : "FAILED");
+    Serial.printf("  Host UART is now %lu. Servos still at %lu need BAUD %lu first.\n",
+                  static_cast<unsigned long>(new_baud), static_cast<unsigned long>(old_baud),
+                  static_cast<unsigned long>(old_baud));
+    snprintf(last_result, sizeof(last_result), "SET_BAUD %lu OK",
+             static_cast<unsigned long>(new_baud));
+    return;
+  }
+
+  // No answer at the new speed: go back and report what the servo holds.
+  setHostBaud(old_baud);
+  if (servo.Ping(servo_id) == servo_id) {
+    const int stored = servo.readByte(servo_id, SMS_STS_BAUD_RATE);
+    const bool locked = servo.LockEprom(servo_id) != 0;
+    if (stored == new_index) {
+      Serial.printf("SET_BAUD WRITTEN: value stored, but ID=%u still answers at %lu "
+                    "(EEPROM relock %s)\n",
+                    servo_id, static_cast<unsigned long>(old_baud), locked ? "OK" : "FAILED");
+      Serial.printf("  Power-cycle the servo, then BAUD %lu and PING.\n",
+                    static_cast<unsigned long>(new_baud));
+      snprintf(last_result, sizeof(last_result), "SET_BAUD needs power");
+    } else {
+      Serial.printf("SET_BAUD FAILED: baud register=%d, not stored (EEPROM relock %s)\n",
+                    stored, locked ? "OK" : "FAILED");
+      snprintf(last_result, sizeof(last_result), "SET_BAUD FAILED");
+    }
+    return;
+  }
+  Serial.printf("SET_BAUD FAILED: ID=%u answers at neither %lu nor %lu\n", servo_id,
+                static_cast<unsigned long>(new_baud), static_cast<unsigned long>(old_baud));
+  Serial.println("  EEPROM lock state unknown. Power-cycle the servo (the lock returns),");
+  Serial.println("  then try PING at both speeds with BAUD.");
+  snprintf(last_result, sizeof(last_result), "SET_BAUD FAILED");
+}
+
 void handleLine(char* line) {
   // Uppercase command word; split off the first argument.
   char* arg = strchr(line, ' ');
@@ -899,6 +1056,8 @@ void handleLine(char* line) {
   else if (strcmp(line, "SCAN") == 0) cmdScan();
   else if (strcmp(line, "ID") == 0) cmdId(arg);
   else if (strcmp(line, "SET_ID") == 0) cmdSetId(arg);
+  else if (strcmp(line, "BAUD") == 0) cmdBaud(arg);
+  else if (strcmp(line, "SET_BAUD") == 0) cmdSetBaud(arg);
   else if (strcmp(line, "MT_ON") == 0) cmdMtOn();
   else if (strcmp(line, "MT_OFF") == 0) cmdMtOff();
   else if (strcmp(line, "MT_JOG") == 0) cmdMtJog(arg);
@@ -1099,16 +1258,34 @@ void setup() {
   Serial.printf("UART: Serial%u\n", STS_TEST_UART_NUM);
   Serial.printf("TX: GPIO%u\n", STS_TEST_UART_TX_PIN);
   Serial.printf("RX: GPIO%u\n", STS_TEST_UART_RX_PIN);
-  Serial.printf("Baud: %lu\n", static_cast<unsigned long>(STS_TEST_UART_BAUD));
+  Serial.printf("Baud: %lu\n", static_cast<unsigned long>(uart_baud));
   Serial.printf("Servo ID: %u\n", servo_id);
   Serial.println();
 
-  servo_serial.begin(STS_TEST_UART_BAUD, SERIAL_8N1, STS_TEST_UART_RX_PIN,
+  servo_serial.begin(uart_baud, SERIAL_8N1, STS_TEST_UART_RX_PIN,
                      STS_TEST_UART_TX_PIN);
   servo.pSerial = &servo_serial;
   servo.IOTimeOut = STS_TEST_UART_IO_TIMEOUT_MS;
 
-  // Boot: communication check only. No position or torque command is sent.
+  // Boot: communication check only. No position or torque command is sent,
+  // and nothing is written. A servo still at the factory speed is found by
+  // PING at that speed, so it can be reached for SET_BAUD.
+  if (!ping(false)) {
+    bool found = false;
+    for (const uint32_t baud : STS_TEST_UART_BAUDS) {
+      if (baud == STS_TEST_UART_BAUD) continue;
+      setHostBaud(baud);
+      if (!ping(false)) continue;
+      found = true;
+      Serial.printf("No reply at %lu. Servo answers at %lu: host UART switched.\n",
+                    static_cast<unsigned long>(STS_TEST_UART_BAUD),
+                    static_cast<unsigned long>(baud));
+      Serial.printf("  Use SET_BAUD %lu to change this servo.\n",
+                    static_cast<unsigned long>(STS_TEST_UART_BAUD));
+      break;
+    }
+    if (!found) setHostBaud(STS_TEST_UART_BAUD);
+  }
   cmdPing();
   Serial.println();
   Serial.println("Servo is not moved at boot. Type HELP for commands.");
